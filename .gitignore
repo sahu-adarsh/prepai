@@ -1,0 +1,55 @@
+# Environment variables
+.env
+.env.local
+.env.*.local
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+env/
+ENV/
+*.egg-info/
+dist/
+build/
+
+# Node
+node_modules/
+.next/
+out/
+.cache/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*.swn
+.DS_Store
+
+# Models (large files)
+backend/models/
+*.onnx
+*.bin
+
+# Logs
+*.log
+logs/
+
+# AWS
+.aws/
+
+# Testing
+.pytest_cache/
+coverage/
+.coverage
+
+# Temporary files
+tmp/
+temp/
+*.tmp
+
+QUICKSTART.md

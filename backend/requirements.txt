@@ -1,0 +1,17 @@
+# FastAPI and server
+fastapi
+uvicorn[standard]
+python-multipart
+websockets
+
+# AWS SDK
+boto3
+botocore
+
+# Voice Processing
+faster-whisper
+piper-tts
+
+# Utilities
+python-dotenv
+pydantic
