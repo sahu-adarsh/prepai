@@ -54,6 +54,7 @@ export default function VoiceInterview({ sessionId, interviewType, candidateName
         const data = JSON.parse(event.data);
 
         if (data.type === 'transcript' && data.role === 'user') {
+          console.log(`[${new Date().toLocaleTimeString()}] Transcript received:`, data.text);
           setMessages(prev => [...prev, { role: 'user', content: data.text, timestamp: new Date() }]);
           setCurrentTranscript('');
           setCurrentResponse('');

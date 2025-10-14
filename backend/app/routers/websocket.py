@@ -113,14 +113,15 @@ async def voice_interview_websocket(websocket: WebSocket, session_id: str):
                 processing = False
                 return
 
-            # Send final transcript to frontend IMMEDIATELY
+            # Send final transcript to frontend IMMEDIATELY with priority
             await websocket.send_json({
                 "type": "transcript",
                 "text": transcript,
                 "role": "user",
                 "is_final": True
             })
-            print(f"[{datetime.now()}] Transcript sent: {transcript}")
+            await asyncio.sleep(0)  # Force context switch, let message send
+            print(f"[{datetime.now().strftime('%H:%M:%S')}] Transcript sent: {transcript}")
 
             # Save to S3 in background (don't wait)
             asyncio.create_task(asyncio.to_thread(
