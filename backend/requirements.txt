@@ -10,7 +10,8 @@ botocore
 
 # Voice Processing
 faster-whisper
-piper-tts
+TTS
+espeak-ng
 
 # Utilities
 python-dotenv

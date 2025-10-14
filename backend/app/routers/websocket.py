@@ -2,7 +2,8 @@ from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from app.services.bedrock_service import BedrockService
 from app.services.s3_service import S3Service
 from faster_whisper import WhisperModel
-from piper import PiperVoice
+from TTS.api import TTS
+import numpy as np
 import io
 import tempfile
 import os
@@ -16,7 +17,7 @@ router = APIRouter()
 
 # Initialize models (lazy loading recommended for production)
 whisper_model = None
-piper_voice = None
+tts_model = None
 
 def get_whisper_model():
     global whisper_model
@@ -24,11 +25,13 @@ def get_whisper_model():
         whisper_model = WhisperModel("small", device="cpu", compute_type="int8")
     return whisper_model
 
-def get_piper_voice():
-    global piper_voice
-    if piper_voice is None:
-        piper_voice = PiperVoice.load("models/piper/en_US-lessac-medium.onnx")
-    return piper_voice
+def get_tts_model():
+    global tts_model
+    if tts_model is None:
+        print("Loading Coqui TTS model (VITS)...")
+        tts_model = TTS(model_name="tts_models/en/vctk/vits", progress_bar=False)
+        print("Coqui TTS model loaded successfully")
+    return tts_model
 
 @router.websocket("/ws/interview/{session_id}")
 async def voice_interview_websocket(websocket: WebSocket, session_id: str):
@@ -42,7 +45,7 @@ async def voice_interview_websocket(websocket: WebSocket, session_id: str):
     bedrock_service = BedrockService()
     s3_service = S3Service()
     whisper = get_whisper_model()
-    voice = get_piper_voice()
+    tts = get_tts_model()
 
     # State management
     streaming_active = False
@@ -80,20 +83,43 @@ async def voice_interview_websocket(websocket: WebSocket, session_id: str):
                 os.unlink(temp_path)
 
     async def text_to_speech(text: str) -> bytes:
-        """Convert text to speech using Piper TTS"""
+        """Convert text to speech using Coqui TTS"""
         try:
+            # Generate audio using Coqui TTS
+            wav_data = tts.tts(text=text, speaker="p225")  # Natural female voice
+
+            # Convert to numpy array
+            if isinstance(wav_data, np.ndarray):
+                wav_array = wav_data
+            elif isinstance(wav_data, list) and wav_data and isinstance(wav_data[0], (int, float)):
+                # List of raw samples (int/float)
+                wav_array = np.array(wav_data, dtype=np.float32)
+            else:
+                # Fallback: try direct conversion
+                wav_array = np.array(wav_data)
+
+            # Ensure it's a 1D array
+            if wav_array.ndim == 0:
+                raise ValueError("TTS returned scalar value instead of audio array")
+
+            wav_array = wav_array.flatten()  # Ensure 1D
+
+            # Convert numpy array to WAV bytes
             wav_buffer = io.BytesIO()
             with wave.open(wav_buffer, 'wb') as wav_file:
                 wav_file.setnchannels(1)
                 wav_file.setsampwidth(2)
-                wav_file.setframerate(voice.config.sample_rate)
+                wav_file.setframerate(22050)  # Coqui default sample rate
 
-                for audio_chunk in voice.synthesize(text):
-                    wav_file.writeframes(audio_chunk.audio_int16_bytes)
+                # Convert float32 to int16
+                audio_int16 = (wav_array * 32767).astype(np.int16)
+                wav_file.writeframes(audio_int16.tobytes())
 
             return wav_buffer.getvalue()
         except Exception as e:
             print(f"TTS error: {e}")
+            import traceback
+            traceback.print_exc()
             return b""
 
     async def process_voice_turn(audio_data: bytes):
