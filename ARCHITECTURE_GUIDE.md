@@ -20,7 +20,7 @@
 - ✅ AWS Bedrock Agent integration service
 - ✅ S3 service for persistent storage
 - ✅ faster-whisper integration for Speech-to-Text
-- ✅ Piper TTS integration for Text-to-Speech
+- ✅ Coqui TTS integration for natural Text-to-Speech
 
 **AWS Integration**
 - ✅ Boto3 SDK configuration for all AWS services
@@ -77,7 +77,7 @@ A modular interview preparation platform with **real-time voice communication** 
 │  │                       │                   │                 │ │
 │  │                       │          Sentence Detection         │ │
 │  │                       │                   ▼                 │ │
-│  │                       └──────►  Piper TTS (Voice)           │ │
+│  │                       └──────►  Coqui TTS (VITS)            │ │
 │  │                                           │                 │ │
 │  │                                    Audio WAV Chunks         │ │
 │  │                                           │                 │ │
@@ -87,7 +87,7 @@ A modular interview preparation platform with **real-time voice communication** 
 │                                                                   │
 │  Self-Hosted Models (No External APIs):                          │
 │  • faster-whisper small (~500MB) - CPU inference                 │
-│  • Piper TTS en_US-lessac-medium (~50MB)                         │
+│  • Coqui TTS VITS model (~200-300MB) - Natural neural voice      │
 └────────────────────────────┬────────────────────────────────────┘
                              │
                              ▼
@@ -125,7 +125,7 @@ KEY FLOW:
 1. User speaks → Mic captures → WebSocket sends audio
 2. faster-whisper transcribes → Progressive + Final text
 3. Bedrock Agent processes → Streaming LLM response
-4. Piper TTS converts → Audio chunks (sentence-by-sentence)
+4. Coqui TTS converts → Audio chunks (sentence-by-sentence)
 5. WebSocket sends audio → User hears AI voice
 6. Transcript displays in real-time on screen
 
@@ -302,7 +302,7 @@ WS     /ws/interview/{session_id}       # Real-time voice conversation
 │  │ STEP 3: Sentence Detection & TTS                 │   │
 │  │  - Buffer: "I have three years of React"         │   │
 │  │  - Detect period/question mark                    │   │
-│  │  - Send to Piper TTS                              │   │
+│  │  - Send to Coqui TTS (VITS)                       │   │
 │  │  - Generate audio WAV                             │   │
 │  │  - Send via WebSocket IMMEDIATELY                 │   │
 │  │                                                    │   │
@@ -337,10 +337,11 @@ Timeline:
 - T=1.5s: Whisper transcription complete
 - T=2s: Bedrock starts streaming response
 - T=2.5s: First sentence complete, TTS starts
-- T=3s: First audio chunk playing (USER HEARS AI)
-- T=3-10s: Remaining sentences stream & play
+- T=3.5s: First audio chunk playing (USER HEARS AI)
+- T=3.5-12s: Remaining sentences stream & play
 
-Total Latency: ~3 seconds from speech end to first audio
+Total Latency: ~3.5 seconds from speech end to first audio
+Note: Natural neural voice quality (Coqui VITS) worth the extra 0.5s
 ```
 
 **Key Optimizations:**
@@ -439,38 +440,45 @@ Be professional, encouraging, and thorough.
 - **No API limits** - Unlimited usage
 - **Privacy** - Audio processed on your infra
 
-#### b) Piper TTS (Text-to-Speech)
+#### b) Coqui TTS (Text-to-Speech)
 
-**Purpose:** Convert AI responses to natural voice audio
+**Purpose:** Convert AI responses to natural, human-like voice audio
 
 **Setup:**
-- **Piper** - Fast, local neural TTS
-- Voice model: `en_US-lessac-medium.onnx` (natural quality)
+- **Coqui TTS** - High-quality neural TTS (VITS architecture)
+- Recommended models:
+  - `tts_models/en/ljspeech/vits` - Single voice, fast (~300ms/sentence)
+  - `tts_models/en/vctk/vits` - Multi-speaker, natural (~400ms/sentence)
+  - `tts_models/multilingual/multi-dataset/xtts_v2` - Best quality (~500ms/sentence)
 - Configuration:
   ```python
-  from piper import PiperVoice
+  from TTS.api import TTS
 
-  voice = PiperVoice.load("models/piper/en_US-lessac-medium.onnx")
+  # Initialize model (do once at startup)
+  tts = TTS(model_name="tts_models/en/vctk/vits")
 
-  # Generate audio
-  for audio_chunk in voice.synthesize(text):
-      wav_data = audio_chunk.audio_int16_bytes
+  # Generate audio for specific speaker
+  wav = tts.tts(text="Your interview answer here", speaker="p225")
+  # Returns: numpy array of audio samples at 22050 Hz
   ```
 
 **Deployment:**
-- Lambda container image with Piper model (~50MB)
-- Memory: 1024 MB
-- Fast CPU inference (~100ms for short sentences)
+- Lambda container image with Coqui model (~200-300MB)
+- Memory: 3072 MB (shared with Whisper)
+- CPU inference: ~300-500ms per sentence
 
 **Streaming Strategy:**
 - Process LLM output sentence-by-sentence
 - Generate audio chunks incrementally
-- Send audio to client as generated (low latency)
+- Send audio to client as generated
+- Convert to WAV format before streaming
 
 **Advantages:**
 - **Very cheap** - No per-character charges
-- **Fast** - Local inference, no network latency
-- **Quality** - Neural voices comparable to cloud TTS
+- **Natural voice** - Neural VITS models sound human-like
+- **Professional quality** - Much better than Piper for demos
+- **Multiple speakers** - Choose voice that fits interviewer persona
+- **Prosody & emotion** - Natural intonation and pacing
 
 #### c) Amazon Bedrock Agent (REQUIRED - Core Component)
 
@@ -519,8 +527,8 @@ Be professional, encouraging, and thorough.
 ```python
 # Handles real-time voice communication
 # Runtime: Python 3.12 with custom container
-# Container includes: FastAPI, faster-whisper, Piper TTS
-# Memory: 3072 MB (2GB for Whisper + 1GB for models/buffer)
+# Container includes: FastAPI, faster-whisper, Coqui TTS
+# Memory: 3072 MB (2GB for Whisper + 1GB for Coqui + buffer)
 # Timeout: 15 minutes (for long interviews)
 # Layers: boto3 (for Bedrock Agent, S3)
 ```
@@ -606,7 +614,7 @@ Be professional, encouraging, and thorough.
 - [x] Setup AWS SDK and credentials
 - [x] Implement WebSocket handler for voice
 - [x] Integrate faster-whisper for STT
-- [x] Integrate Piper TTS for voice synthesis
+- [x] Integrate Coqui TTS for natural voice synthesis
 - [x] Bedrock Agent service integration
 
 **AWS:**
@@ -647,10 +655,10 @@ Be professional, encouraging, and thorough.
 
 **Voice Pipeline:**
 - [ ] Setup faster-whisper in Lambda container
-- [ ] Setup Piper TTS in Lambda container
+- [ ] Setup Coqui TTS in Lambda container
 - [ ] Implement WebSocket voice handler
 - [ ] Connect Bedrock Agent to voice pipeline
-- [ ] Test STT (Whisper) → LLM (Bedrock) → TTS (Piper) flow
+- [ ] Test STT (Whisper) → LLM (Bedrock) → TTS (Coqui) flow
 
 **Frontend Voice UI:**
 - [ ] Implement microphone access and audio capture
@@ -740,10 +748,10 @@ bedrock_client = boto3.client('bedrock-agent-runtime')
 
 # Local AI models
 from faster_whisper import WhisperModel
-from piper import PiperVoice
+from TTS.api import TTS
 
 whisper_model = WhisperModel("small", device="cpu", compute_type="int8")
-piper_voice = PiperVoice.load("models/piper/en_US-lessac-medium.onnx")
+tts_model = TTS(model_name="tts_models/en/vctk/vits")
 
 AGENT_ID = "YOUR_AGENT_ID"
 AGENT_ALIAS_ID = "YOUR_ALIAS_ID"
@@ -850,17 +858,22 @@ async def handle_voice_websocket(websocket: WebSocket, session_id: str):
             os.unlink(temp_path)
 
     async def text_to_speech(text: str) -> bytes:
-        """Use Piper TTS to generate speech audio"""
+        """Use Coqui TTS to generate natural speech audio"""
         try:
+            # Generate audio (returns numpy array)
+            wav_array = tts_model.tts(text=text, speaker="p225")  # Natural female voice
+
+            # Convert numpy to WAV bytes
+            import numpy as np
             wav_buffer = io.BytesIO()
             with wave.open(wav_buffer, 'wb') as wav_file:
                 wav_file.setnchannels(1)
                 wav_file.setsampwidth(2)
-                wav_file.setframerate(piper_voice.config.sample_rate)
+                wav_file.setframerate(22050)  # Coqui default sample rate
 
-                # Generate audio chunks
-                for audio_chunk in piper_voice.synthesize(text):
-                    wav_file.writeframes(audio_chunk.audio_int16_bytes)
+                # Convert float32 to int16
+                audio_int16 = (wav_array * 32767).astype(np.int16)
+                wav_file.writeframes(audio_int16.tobytes())
 
             return wav_buffer.getvalue()
         except Exception as e:
@@ -1233,12 +1246,8 @@ RUN pip install -r requirements.txt
 # Download Whisper model
 RUN python -c "from faster_whisper import WhisperModel; WhisperModel('small', device='cpu', compute_type='int8', download_root='/var/task/models')"
 
-# Download Piper voice model
-RUN mkdir -p /var/task/models/piper && \
-    wget -O /var/task/models/piper/en_US-lessac-medium.onnx \
-    https://huggingface.co/rhasspy/piper-voices/resolve/main/en/en_US/lessac/medium/en_US-lessac-medium.onnx && \
-    wget -O /var/task/models/piper/en_US-lessac-medium.onnx.json \
-    https://huggingface.co/rhasspy/piper-voices/resolve/main/en/en_US/lessac/medium/en_US-lessac-medium.onnx.json
+# Download Coqui TTS model
+RUN python -c "from TTS.api import TTS; tts = TTS('tts_models/en/vctk/vits', progress_bar=False)"
 
 # Copy application code
 COPY app/ /var/task/app/
@@ -1331,7 +1340,7 @@ NEXT_PUBLIC_WS_URL=wss://your-ws.execute-api.region.amazonaws.com
 - **S3:** ~$10 (audio recordings + transcripts)
 - **API Gateway WebSocket:** ~$10 (voice streaming)
 - **faster-whisper:** $0 (self-hosted in Lambda)
-- **Piper TTS:** $0 (self-hosted in Lambda)
+- **Coqui TTS:** $0 (self-hosted in Lambda)
 - **Bedrock Knowledge Base:** ~$10
 
 **Total: ~$110-180/month**
@@ -1379,7 +1388,7 @@ NEXT_PUBLIC_WS_URL=wss://your-ws.execute-api.region.amazonaws.com
 
 1. **🎤 REAL-TIME VOICE COMMUNICATION** - Natural voice interviews (PRIMARY FEATURE)
 2. **Fully leverages AWS Bedrock Agent primitives** (InvokeAgent, ActionGroups, KnowledgeBase)
-3. **Cost-optimized voice pipeline** - faster-whisper + Bedrock + Piper (85% cheaper than cloud STT/TTS)
+3. **Cost-optimized voice pipeline** - faster-whisper + Bedrock + Coqui TTS (85% cheaper than cloud STT/TTS)
 4. **Demonstrates true autonomous AI** - adapts questions, evaluates responses, provides feedback without human intervention
 5. **Practical real-world application** - solves genuine problem for students and professionals
 6. **Low-latency streaming** - Progressive STT, streaming LLM, incremental TTS
