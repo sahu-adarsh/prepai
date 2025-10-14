@@ -1,0 +1,6 @@
+#1 Throttling error
+AI processing error: An error occurred (throttlingException) when calling the InvokeAgent operation: Your request rate is too high. Reduce the frequency of requests. Check your Bedrock model invocation quotas to find the acceptable frequency.
+
+#2 Initial connection/authentication to AWS Bedrock
+Fix: Connection Pooling + Keep-Alive
+

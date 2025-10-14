@@ -53,10 +53,7 @@ export default function VoiceInterview({ sessionId, interviewType, candidateName
       } else {
         const data = JSON.parse(event.data);
 
-        if (data.type === 'transcript_partial' && data.role === 'user') {
-          setCurrentTranscript(data.text);
-          setIsProcessing(true);
-        } else if (data.type === 'transcript' && data.role === 'user') {
+        if (data.type === 'transcript' && data.role === 'user') {
           setMessages(prev => [...prev, { role: 'user', content: data.text, timestamp: new Date() }]);
           setCurrentTranscript('');
           setCurrentResponse('');
@@ -173,12 +170,6 @@ export default function VoiceInterview({ sessionId, interviewType, candidateName
               }
 
               mediaRecorder.start(500);
-
-              progressiveTranscriptTimer = setInterval(() => {
-                if (wsRef.current?.readyState === WebSocket.OPEN && isSpeaking) {
-                  wsRef.current.send(JSON.stringify({ type: 'process_progressive' }));
-                }
-              }, 2000);
             }
 
             if (silenceTimeoutRef.current) {

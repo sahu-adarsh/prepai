@@ -9,6 +9,7 @@ import os
 import wave
 import re
 import json
+import asyncio
 from datetime import datetime
 
 router = APIRouter()
@@ -51,6 +52,9 @@ async def voice_interview_websocket(websocket: WebSocket, session_id: str):
 
     async def transcribe_audio(audio_data: bytes) -> str:
         """Convert audio to text using faster-whisper"""
+        import time
+        start_time = time.time()
+
         suffix = '.webm' if audio_data[:4] != b'RIFF' else '.wav'
 
         with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as temp_audio:
@@ -60,11 +64,13 @@ async def voice_interview_websocket(websocket: WebSocket, session_id: str):
         try:
             segments, _ = whisper.transcribe(
                 temp_path,
-                beam_size=5,
+                beam_size=1,  # Reduced from 5 for speed
                 vad_filter=True,
                 vad_parameters=dict(min_silence_duration_ms=500)
             )
             text = " ".join([segment.text for segment in segments]).strip()
+            elapsed = time.time() - start_time
+            print(f"[WHISPER] Transcription took {elapsed:.2f}s")
             return text
         except Exception as e:
             print(f"Transcription error: {e}")
@@ -107,28 +113,35 @@ async def voice_interview_websocket(websocket: WebSocket, session_id: str):
                 processing = False
                 return
 
-            # Send final transcript to frontend
+            # Send final transcript to frontend IMMEDIATELY
             await websocket.send_json({
                 "type": "transcript",
                 "text": transcript,
                 "role": "user",
                 "is_final": True
             })
+            print(f"[{datetime.now()}] Transcript sent: {transcript}")
 
-            # Save to session transcript
-            s3_service.update_session_transcript(session_id, {
-                "role": "user",
-                "content": transcript,
-                "timestamp": datetime.utcnow().isoformat()
-            })
+            # Save to S3 in background (don't wait)
+            asyncio.create_task(asyncio.to_thread(
+                s3_service.update_session_transcript,
+                session_id,
+                {
+                    "role": "user",
+                    "content": transcript,
+                    "timestamp": datetime.utcnow().isoformat()
+                }
+            ))
 
-            # Step 2: Get response from Bedrock Agent (streaming)
+            # Step 2: Get response from Bedrock Agent (streaming) - starts IMMEDIATELY
+            print(f"[{datetime.now()}] Calling Bedrock Agent...")
             full_response = ""
             text_buffer = ""
             sentence_endings = re.compile(r'[.!?]\s*')
 
             try:
                 event_stream = bedrock_service.invoke_agent(session_id, transcript)
+                print(f"[{datetime.now()}] Bedrock Agent invoked")
 
                 for event in event_stream:
                     if 'chunk' in event:
@@ -222,18 +235,6 @@ async def voice_interview_websocket(websocket: WebSocket, session_id: str):
                                 combined_audio = b''.join(streaming_audio_chunks)
                                 streaming_audio_chunks = []
                                 await process_voice_turn(combined_audio)
-                        elif data.get('type') == 'process_progressive':
-                            # Progressive transcription (optional)
-                            if streaming_audio_chunks:
-                                combined_audio = b''.join(streaming_audio_chunks)
-                                transcript = await transcribe_audio(combined_audio)
-                                if transcript:
-                                    await websocket.send_json({
-                                        "type": "transcript_partial",
-                                        "text": transcript,
-                                        "role": "user",
-                                        "is_final": False
-                                    })
                 except Exception as e:
                     print(f"Error parsing control message: {e}")
 
