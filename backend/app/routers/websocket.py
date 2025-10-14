@@ -39,13 +39,20 @@ async def voice_interview_websocket(websocket: WebSocket, session_id: str):
     WebSocket endpoint for real-time voice interviews
     Handles: Audio streaming, Speech-to-Text, LLM interaction, Text-to-Speech
     """
-    await websocket.accept()
+    try:
+        # Initialize models BEFORE accepting connection
+        whisper = get_whisper_model()
+        tts = get_tts_model()
 
-    # Initialize services
-    bedrock_service = BedrockService()
-    s3_service = S3Service()
-    whisper = get_whisper_model()
-    tts = get_tts_model()
+        await websocket.accept()
+
+        # Initialize services
+        bedrock_service = BedrockService()
+        s3_service = S3Service()
+    except Exception as e:
+        print(f"Model initialization error: {e}")
+        await websocket.close(code=1011, reason=f"Model init failed: {str(e)}")
+        return
 
     # State management
     streaming_active = False
@@ -86,7 +93,7 @@ async def voice_interview_websocket(websocket: WebSocket, session_id: str):
         """Convert text to speech using Coqui TTS"""
         try:
             # Generate audio using Coqui TTS
-            wav_data = tts.tts(text=text, speaker="p225")  # Natural female voice
+            wav_data = tts.tts(text=text, speaker="p232") # Authoritative male
 
             # Convert to numpy array
             if isinstance(wav_data, np.ndarray):

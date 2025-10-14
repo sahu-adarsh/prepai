@@ -74,10 +74,6 @@ export default function VoiceInterview({ sessionId, interviewType, candidateName
       }
     };
 
-    wsRef.current.onerror = () => {
-      setError('Connection error');
-    };
-
     return () => {
       wsRef.current?.close();
       if (timerRef.current) {
