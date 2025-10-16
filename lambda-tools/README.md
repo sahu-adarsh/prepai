@@ -43,7 +43,7 @@ lambda-tools/
 
 - AWS CLI configured
 - SAM CLI installed (for SAM deployment) OR just AWS CLI
-- Python 3.12+
+- Python 3.11+
 - Bedrock Agent created (from Phase 2)
 
 ### Option 1: Deploy with SAM (Recommended)
@@ -70,7 +70,7 @@ cd ..
 
 aws lambda create-function \
   --function-name prepai-code-executor \
-  --runtime python3.12 \
+  --runtime python3.11 \
   --role arn:aws:iam::ACCOUNT_ID:role/prepai-lambda-role \
   --handler lambda_function.lambda_handler \
   --zip-file fileb://code-executor.zip \

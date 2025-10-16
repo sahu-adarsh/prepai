@@ -6,7 +6,7 @@ Globals:
   Function:
     Timeout: 30
     MemorySize: 512
-    Runtime: python3.12
+    Runtime: python3.11
     Architectures:
       - x86_64
     Environment:
@@ -24,7 +24,6 @@ Resources:
   PrepAILambdaRole:
     Type: AWS::IAM::Role
     Properties:
-      RoleName: prepai-lambda-tools-role
       AssumeRolePolicyDocument:
         Version: '2012-10-17'
         Statement:
