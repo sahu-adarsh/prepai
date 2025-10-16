@@ -42,6 +42,12 @@ export default function VoiceInterview({ sessionId, interviewType, candidateName
     const wsUrl = process.env.NEXT_PUBLIC_WS_URL || 'ws://localhost:8000';
     wsRef.current = new WebSocket(`${wsUrl}/ws/interview/${sessionId}`);
 
+    wsRef.current.onopen = () => {
+      console.log('WebSocket connected');
+      // Auto-start interview when WebSocket is connected
+      initializeInterview();
+    };
+
     wsRef.current.onmessage = async (event) => {
       if (event.data instanceof Blob) {
         const audioBuffer = await event.data.arrayBuffer();
@@ -79,6 +85,13 @@ export default function VoiceInterview({ sessionId, interviewType, candidateName
       if (timerRef.current) {
         clearInterval(timerRef.current);
       }
+      // Clean up media resources
+      if (streamRef.current) {
+        streamRef.current.getTracks().forEach(track => track.stop());
+      }
+      if (audioContextRef.current) {
+        audioContextRef.current.close();
+      }
     };
   }, [sessionId]);
 
@@ -99,117 +112,100 @@ export default function VoiceInterview({ sessionId, interviewType, candidateName
     };
   }, [isActive]);
 
-  const toggleConversation = async () => {
-    if (!isActive) {
-      try {
-        const stream = await navigator.mediaDevices.getUserMedia({
-          audio: {
-            channelCount: 1,
-            sampleRate: 16000,
-            echoCancellation: true,
-            noiseSuppression: true
-          }
-        });
-        streamRef.current = stream;
-
-        const audioContext = new AudioContext();
-        audioContextRef.current = audioContext;
-        const source = audioContext.createMediaStreamSource(stream);
-        const analyser = audioContext.createAnalyser();
-        analyser.fftSize = 2048;
-        source.connect(analyser);
-        analyserRef.current = analyser;
-
-        const mimeType = MediaRecorder.isTypeSupported('audio/wav') ? 'audio/wav' : 'audio/webm';
-        const mediaRecorder = new MediaRecorder(stream, { mimeType, audioBitsPerSecond: 16000 });
-        mediaRecorderRef.current = mediaRecorder;
-
-        let audioChunks: Blob[] = [];
-        let isSpeaking = false;
-        let progressiveTranscriptTimer: NodeJS.Timeout | null = null;
-
-        mediaRecorder.ondataavailable = (event) => {
-          if (event.data.size > 0) {
-            audioChunks.push(event.data);
-
-            if (wsRef.current?.readyState === WebSocket.OPEN && isSpeaking) {
-              const chunk = new Blob([event.data], { type: mimeType });
-              wsRef.current.send(chunk);
-            }
-          }
-        };
-
-        mediaRecorder.onstop = () => {
-          if (wsRef.current?.readyState === WebSocket.OPEN) {
-            wsRef.current.send(JSON.stringify({ type: 'speech_end' }));
-          }
-          audioChunks = [];
-          setIsRecording(false);
-        };
-
-        const checkSilence = () => {
-          if (!analyserRef.current) return;
-
-          const dataArray = new Uint8Array(analyserRef.current.frequencyBinCount);
-          analyserRef.current.getByteFrequencyData(dataArray);
-          const average = dataArray.reduce((a, b) => a + b) / dataArray.length;
-
-          const SPEECH_THRESHOLD = 10;
-          const SILENCE_DURATION = 1000;
-
-          if (average > SPEECH_THRESHOLD) {
-            if (!isSpeaking) {
-              isSpeaking = true;
-              setIsRecording(true);
-
-              if (wsRef.current?.readyState === WebSocket.OPEN) {
-                wsRef.current.send(JSON.stringify({ type: 'speech_start' }));
-              }
-
-              mediaRecorder.start(500);
-            }
-
-            if (silenceTimeoutRef.current) {
-              clearTimeout(silenceTimeoutRef.current);
-            }
-            silenceTimeoutRef.current = setTimeout(() => {
-              if (mediaRecorder.state === 'recording') {
-                mediaRecorder.stop();
-                isSpeaking = false;
-
-                if (progressiveTranscriptTimer) {
-                  clearInterval(progressiveTranscriptTimer);
-                  progressiveTranscriptTimer = null;
-                }
-              }
-            }, SILENCE_DURATION);
-          }
-        };
-
-        const intervalId = setInterval(checkSilence, 100);
-        (mediaRecorder as any).intervalId = intervalId;
-
-        setIsActive(true);
-        setError('');
-      } catch (err) {
-        setError('Microphone access denied: ' + (err as Error).message);
-      }
-    } else {
-      if (mediaRecorderRef.current) {
-        clearInterval((mediaRecorderRef.current as any).intervalId);
-        if (mediaRecorderRef.current.state === 'recording') {
-          mediaRecorderRef.current.stop();
+  const initializeInterview = async () => {
+    try {
+      // Request microphone permissions and set up audio
+      const stream = await navigator.mediaDevices.getUserMedia({
+        audio: {
+          channelCount: 1,
+          sampleRate: 16000,
+          echoCancellation: true,
+          noiseSuppression: true
         }
+      });
+      streamRef.current = stream;
+
+      const audioContext = new AudioContext();
+      audioContextRef.current = audioContext;
+      const source = audioContext.createMediaStreamSource(stream);
+      const analyser = audioContext.createAnalyser();
+      analyser.fftSize = 2048;
+      source.connect(analyser);
+      analyserRef.current = analyser;
+
+      const mimeType = MediaRecorder.isTypeSupported('audio/wav') ? 'audio/wav' : 'audio/webm';
+      const mediaRecorder = new MediaRecorder(stream, { mimeType, audioBitsPerSecond: 16000 });
+      mediaRecorderRef.current = mediaRecorder;
+
+      let audioChunks: Blob[] = [];
+      let isSpeaking = false;
+
+      mediaRecorder.ondataavailable = (event) => {
+        if (event.data.size > 0) {
+          audioChunks.push(event.data);
+
+          if (wsRef.current?.readyState === WebSocket.OPEN && isSpeaking) {
+            const chunk = new Blob([event.data], { type: mimeType });
+            wsRef.current.send(chunk);
+          }
+        }
+      };
+
+      mediaRecorder.onstop = () => {
+        if (wsRef.current?.readyState === WebSocket.OPEN) {
+          wsRef.current.send(JSON.stringify({ type: 'speech_end' }));
+        }
+        audioChunks = [];
+        setIsRecording(false);
+      };
+
+      const checkSilence = () => {
+        if (!analyserRef.current) return;
+
+        const dataArray = new Uint8Array(analyserRef.current.frequencyBinCount);
+        analyserRef.current.getByteFrequencyData(dataArray);
+        const average = dataArray.reduce((a, b) => a + b) / dataArray.length;
+
+        const SPEECH_THRESHOLD = 10;
+        const SILENCE_DURATION = 1000;
+
+        if (average > SPEECH_THRESHOLD) {
+          if (!isSpeaking) {
+            isSpeaking = true;
+            setIsRecording(true);
+
+            if (wsRef.current?.readyState === WebSocket.OPEN) {
+              wsRef.current.send(JSON.stringify({ type: 'speech_start' }));
+            }
+
+            mediaRecorder.start(500);
+          }
+
+          if (silenceTimeoutRef.current) {
+            clearTimeout(silenceTimeoutRef.current);
+          }
+          silenceTimeoutRef.current = setTimeout(() => {
+            if (mediaRecorder.state === 'recording') {
+              mediaRecorder.stop();
+              isSpeaking = false;
+            }
+          }, SILENCE_DURATION);
+        }
+      };
+
+      const intervalId = setInterval(checkSilence, 100);
+      (mediaRecorder as any).intervalId = intervalId;
+
+      setIsActive(true);
+      setError('');
+
+      // Signal to backend that client is ready for the interview to start
+      if (wsRef.current?.readyState === WebSocket.OPEN) {
+        wsRef.current.send(JSON.stringify({ type: 'interview_ready' }));
       }
-      if (silenceTimeoutRef.current) {
-        clearTimeout(silenceTimeoutRef.current);
-      }
-      streamRef.current?.getTracks().forEach(track => track.stop());
-      if (audioContextRef.current) {
-        audioContextRef.current.close();
-      }
-      setIsActive(false);
-      setIsRecording(false);
+    } catch (err) {
+      setError('Microphone access denied. Please allow microphone access to start the interview.');
+      console.error('Microphone initialization error:', err);
     }
   };
 
@@ -348,47 +344,55 @@ export default function VoiceInterview({ sessionId, interviewType, candidateName
 
         {/* Voice Control Panel (Right) */}
         <div className="w-1/2 flex flex-col items-center justify-center p-8 bg-gradient-to-br from-blue-50 to-indigo-50">
-          <h1 className="text-3xl font-bold mb-8 text-gray-900">Voice Interview Mode</h1>
+          <h1 className="text-3xl font-bold mb-8 text-gray-900">Voice Interview</h1>
 
-          <button
-            onClick={toggleConversation}
-            className={`w-48 h-48 rounded-full text-white font-semibold transition-all shadow-lg ${
-              isActive
-                ? 'bg-red-500 hover:bg-red-600'
-                : 'bg-blue-500 hover:bg-blue-600'
-            } ${isRecording ? 'animate-pulse ring-4 ring-green-400' : ''}`}
-          >
-            <div className="text-6xl mb-2">
-              {isRecording ? '🎙️' : isActive ? '⏹' : '🎤'}
+          {/* Status Indicator */}
+          <div className={`w-48 h-48 rounded-full flex items-center justify-center transition-all shadow-lg ${
+            isRecording
+              ? 'bg-green-500 animate-pulse ring-4 ring-green-400'
+              : isProcessing
+              ? 'bg-blue-500 animate-pulse'
+              : 'bg-gray-400'
+          }`}>
+            <div className="text-center text-white">
+              <div className="text-6xl mb-2">
+                {isRecording ? '🎙️' : isProcessing ? '🤖' : '👤'}
+              </div>
+              <div className="text-sm font-semibold">
+                {isRecording ? 'You are speaking' : isProcessing ? 'Interviewer responding' : 'Ready to listen'}
+              </div>
             </div>
-            <div className="text-sm">
-              {isRecording ? 'Speaking' : isActive ? 'Stop' : 'Start'}
-            </div>
-          </button>
+          </div>
 
           {isActive && (
             <div className="mt-6 text-center space-y-2">
               <p className="text-lg font-medium text-gray-700">
-                {isRecording ? '🟢 Listening...' : '⚪ Waiting for speech...'}
+                {isRecording ? '🟢 Listening to your response...' : isProcessing ? '💭 Interviewer is thinking...' : '⚪ Speak when you\'re ready'}
               </p>
-              {isProcessing && (
-                <p className="text-sm text-blue-600 animate-pulse">
-                  ⚡ Processing response...
-                </p>
-              )}
             </div>
           )}
 
-          {!isActive && (
-            <p className="mt-6 text-gray-600 text-center max-w-md">
-              Click the microphone to start your voice interview. Speak naturally and the AI interviewer will respond.
-            </p>
+          {!isActive && !error && (
+            <div className="mt-6 text-center space-y-2">
+              <p className="text-lg font-medium text-blue-600 animate-pulse">
+                🔄 Initializing interview...
+              </p>
+              <p className="text-sm text-gray-600">
+                Please allow microphone access when prompted
+              </p>
+            </div>
           )}
 
           {error && (
             <div className="mt-8 w-full max-w-md p-4 bg-red-100 border border-red-400 rounded">
               <p className="font-semibold text-red-700">Error:</p>
               <p className="text-red-600">{error}</p>
+              <button
+                onClick={initializeInterview}
+                className="mt-3 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors w-full"
+              >
+                Retry
+              </button>
             </div>
           )}
         </div>

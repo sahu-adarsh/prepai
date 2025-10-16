@@ -59,6 +59,7 @@ async def voice_interview_websocket(websocket: WebSocket, session_id: str):
     streaming_audio_chunks = []
     accumulated_transcript = ""
     processing = False
+    interview_started = False
 
     async def transcribe_audio(audio_data: bytes) -> str:
         """Convert audio to text using faster-whisper"""
@@ -128,6 +129,97 @@ async def voice_interview_websocket(websocket: WebSocket, session_id: str):
             import traceback
             traceback.print_exc()
             return b""
+
+    async def send_interviewer_introduction():
+        """Send interviewer's initial introduction"""
+        nonlocal processing
+
+        if processing:
+            return
+
+        processing = True
+
+        try:
+            # Get session data to personalize greeting
+            session_data = s3_service.get_session(session_id)
+            candidate_name = session_data.get("candidate_name", "candidate") if session_data else "candidate"
+            interview_type = session_data.get("interview_type", "Technical Interview") if session_data else "Technical Interview"
+
+            # Create greeting prompt for the interviewer
+            greeting_prompt = f"Start the interview by introducing yourself as the interviewer and welcoming {candidate_name} to the {interview_type}. Keep it brief and professional."
+
+            print(f"[{datetime.now()}] Sending interviewer introduction...")
+            full_response = ""
+            text_buffer = ""
+            sentence_endings = re.compile(r'[.!?]\s*')
+
+            try:
+                event_stream = bedrock_service.invoke_agent(session_id, greeting_prompt)
+                print(f"[{datetime.now()}] Bedrock Agent invoked for introduction")
+
+                for event in event_stream:
+                    if 'chunk' in event:
+                        chunk_data = event['chunk']
+                        if 'bytes' in chunk_data:
+                            chunk_text = chunk_data['bytes'].decode('utf-8')
+                            full_response += chunk_text
+                            text_buffer += chunk_text
+
+                            # Send text chunk to frontend
+                            await websocket.send_json({
+                                "type": "llm_chunk",
+                                "text": chunk_text
+                            })
+
+                            # Generate TTS for complete sentences
+                            sentences = sentence_endings.split(text_buffer)
+
+                            for sentence in sentences[:-1]:
+                                sentence = sentence.strip()
+                                if sentence:
+                                    audio_bytes = await text_to_speech(sentence)
+                                    if len(audio_bytes) > 44:  # More than WAV header
+                                        await websocket.send_bytes(audio_bytes)
+
+                            # Keep incomplete fragment
+                            text_buffer = sentences[-1] if sentences else ""
+
+                # Process remaining text
+                if text_buffer.strip():
+                    audio_bytes = await text_to_speech(text_buffer)
+                    if len(audio_bytes) > 44:
+                        await websocket.send_bytes(audio_bytes)
+
+            except Exception as e:
+                print(f"Bedrock Agent error during introduction: {e}")
+                # Fallback greeting
+                full_response = f"Hello {candidate_name}, welcome to your {interview_type}. I'll be conducting this interview today. Let's begin."
+                audio_bytes = await text_to_speech(full_response)
+                if len(audio_bytes) > 44:
+                    await websocket.send_bytes(audio_bytes)
+
+            # Signal completion
+            await websocket.send_json({
+                "type": "assistant_complete",
+                "text": full_response,
+                "role": "assistant"
+            })
+
+            # Save introduction to transcript
+            s3_service.update_session_transcript(session_id, {
+                "role": "assistant",
+                "content": full_response,
+                "timestamp": datetime.utcnow().isoformat()
+            })
+
+        except Exception as e:
+            print(f"Error sending introduction: {e}")
+            await websocket.send_json({
+                "type": "error",
+                "message": str(e)
+            })
+        finally:
+            processing = False
 
     async def process_voice_turn(audio_data: bytes):
         """Process complete voice turn: STT -> Bedrock -> TTS"""
@@ -257,7 +349,11 @@ async def voice_interview_websocket(websocket: WebSocket, session_id: str):
                 try:
                     data = json.loads(message['text'])
                     if isinstance(data, dict):
-                        if data.get('type') == 'speech_start':
+                        if data.get('type') == 'interview_ready' and not interview_started:
+                            print(f"[{session_id}] Client ready, sending introduction...")
+                            interview_started = True
+                            await send_interviewer_introduction()
+                        elif data.get('type') == 'speech_start':
                             print(f"[{session_id}] Speech started")
                             streaming_active = True
                             streaming_audio_chunks = []
