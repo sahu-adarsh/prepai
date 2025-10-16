@@ -52,6 +52,6 @@ tmp/
 temp/
 *.tmp
 
-QUICKSTART.md
 docs/
 .DS_Store
+scripts/

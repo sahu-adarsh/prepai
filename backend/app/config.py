@@ -18,7 +18,6 @@ BEDROCK_AGENT_ALIAS_ID = os.getenv("BEDROCK_AGENT_ALIAS_ID", "")
 
 # Voice Models Configuration
 WHISPER_MODEL = os.getenv("WHISPER_MODEL", "small")
-PIPER_MODEL_PATH = os.getenv("PIPER_MODEL_PATH", "models/piper/en_US-lessac-medium.onnx")
 
 # WebSocket Configuration
 WS_CONNECTION_TIMEOUT = int(os.getenv("WS_CONNECTION_TIMEOUT", "900"))  # 15 minutes

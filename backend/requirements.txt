@@ -1,3 +1,5 @@
+# Python version 3.11.14
+
 # FastAPI and server
 fastapi
 uvicorn[standard]
