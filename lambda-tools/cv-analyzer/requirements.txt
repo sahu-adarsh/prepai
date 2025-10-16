@@ -1,0 +1,11 @@
+# CV Analyzer Lambda Dependencies
+
+# AWS SDK (included in Lambda runtime)
+boto3>=1.28.0
+
+# PDF parsing
+PyPDF2>=3.0.0
+
+# Optional: Advanced text extraction
+# pdfplumber>=0.10.0
+# python-docx>=1.0.0  # For DOCX support

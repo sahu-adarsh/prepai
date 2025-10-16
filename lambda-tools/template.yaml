@@ -1,0 +1,138 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: PrepAI Lambda Tools - Code Executor, CV Analyzer, and Performance Evaluator
+
+Globals:
+  Function:
+    Timeout: 30
+    MemorySize: 512
+    Runtime: python3.12
+    Architectures:
+      - x86_64
+    Environment:
+      Variables:
+        S3_BUCKET_USER_DATA: prepai-user-data
+
+Parameters:
+  BedrockAgentRoleArn:
+    Type: String
+    Description: ARN of the Bedrock Agent role that will invoke these Lambda functions
+    Default: ""
+
+Resources:
+  # IAM Role for Lambda Functions
+  PrepAILambdaRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: prepai-lambda-tools-role
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: S3Access
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - s3:GetObject
+                  - s3:PutObject
+                  - s3:ListBucket
+                Resource:
+                  - arn:aws:s3:::prepai-user-data/*
+                  - arn:aws:s3:::prepai-user-data
+
+  # Lambda Function: Code Executor
+  CodeExecutorFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: prepai-code-executor
+      Description: Execute and validate candidate code submissions
+      CodeUri: code-executor/
+      Handler: lambda_function.lambda_handler
+      Role: !GetAtt PrepAILambdaRole.Arn
+      Timeout: 30
+      MemorySize: 512
+      Environment:
+        Variables:
+          MAX_EXECUTION_TIME: 5
+
+  # Lambda Function: CV Analyzer
+  CVAnalyzerFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: prepai-cv-analyzer
+      Description: Extract and analyze candidate resume/CV information
+      CodeUri: cv-analyzer/
+      Handler: lambda_function.lambda_handler
+      Role: !GetAtt PrepAILambdaRole.Arn
+      Timeout: 30
+      MemorySize: 512
+
+  # Lambda Function: Performance Evaluator
+  PerformanceEvaluatorFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: prepai-performance-evaluator
+      Description: Generate interview performance reports
+      CodeUri: performance-evaluator/
+      Handler: lambda_function.lambda_handler
+      Role: !GetAtt PrepAILambdaRole.Arn
+      Timeout: 30
+      MemorySize: 512
+
+  # Lambda Permissions for Bedrock Agent
+  CodeExecutorInvokePermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref CodeExecutorFunction
+      Action: lambda:InvokeFunction
+      Principal: bedrock.amazonaws.com
+      SourceArn: !Sub "arn:aws:bedrock:${AWS::Region}:${AWS::AccountId}:agent/*"
+
+  CVAnalyzerInvokePermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref CVAnalyzerFunction
+      Action: lambda:InvokeFunction
+      Principal: bedrock.amazonaws.com
+      SourceArn: !Sub "arn:aws:bedrock:${AWS::Region}:${AWS::AccountId}:agent/*"
+
+  PerformanceEvaluatorInvokePermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref PerformanceEvaluatorFunction
+      Action: lambda:InvokeFunction
+      Principal: bedrock.amazonaws.com
+      SourceArn: !Sub "arn:aws:bedrock:${AWS::Region}:${AWS::AccountId}:agent/*"
+
+Outputs:
+  CodeExecutorFunctionArn:
+    Description: ARN of Code Executor Lambda Function
+    Value: !GetAtt CodeExecutorFunction.Arn
+    Export:
+      Name: PrepAI-CodeExecutorArn
+
+  CVAnalyzerFunctionArn:
+    Description: ARN of CV Analyzer Lambda Function
+    Value: !GetAtt CVAnalyzerFunction.Arn
+    Export:
+      Name: PrepAI-CVAnalyzerArn
+
+  PerformanceEvaluatorFunctionArn:
+    Description: ARN of Performance Evaluator Lambda Function
+    Value: !GetAtt PerformanceEvaluatorFunction.Arn
+    Export:
+      Name: PrepAI-PerformanceEvaluatorArn
+
+  LambdaRoleArn:
+    Description: ARN of Lambda Execution Role
+    Value: !GetAtt PrepAILambdaRole.Arn
+    Export:
+      Name: PrepAI-LambdaRoleArn

@@ -1,0 +1,207 @@
+{
+  "openapi": "3.0.0",
+  "info": {
+    "title": "Performance Evaluator API",
+    "description": "Generate comprehensive interview performance reports with scores and feedback",
+    "version": "1.0.0"
+  },
+  "paths": {
+    "/evaluate": {
+      "post": {
+        "summary": "Generate performance report",
+        "description": "Evaluates candidate's interview performance across multiple criteria and generates a comprehensive report with scores, strengths, weaknesses, and recommendations.",
+        "operationId": "evaluatePerformance",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "sessionId": {
+                    "type": "string",
+                    "description": "Unique session identifier"
+                  },
+                  "candidateName": {
+                    "type": "string",
+                    "description": "Name of the candidate"
+                  },
+                  "interviewType": {
+                    "type": "string",
+                    "description": "Type of interview conducted"
+                  },
+                  "conversationHistory": {
+                    "type": "array",
+                    "description": "Full conversation transcript",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "role": {
+                          "type": "string",
+                          "enum": ["user", "assistant"]
+                        },
+                        "content": {
+                          "type": "string"
+                        },
+                        "timestamp": {
+                          "type": "number"
+                        }
+                      }
+                    }
+                  },
+                  "codeSubmissions": {
+                    "type": "array",
+                    "description": "Array of code submissions and results",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "allTestsPassed": {
+                          "type": "boolean"
+                        },
+                        "executionTime": {
+                          "type": "number"
+                        },
+                        "language": {
+                          "type": "string"
+                        },
+                        "error": {
+                          "type": "string"
+                        }
+                      }
+                    }
+                  },
+                  "duration": {
+                    "type": "integer",
+                    "description": "Interview duration in seconds"
+                  },
+                  "saveToS3": {
+                    "type": "boolean",
+                    "description": "Whether to save report to S3",
+                    "default": true
+                  }
+                },
+                "required": ["sessionId"]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Performance report generated successfully",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "description": "Whether evaluation was successful"
+                    },
+                    "sessionId": {
+                      "type": "string",
+                      "description": "Session identifier"
+                    },
+                    "candidateName": {
+                      "type": "string",
+                      "description": "Candidate name"
+                    },
+                    "interviewType": {
+                      "type": "string",
+                      "description": "Interview type"
+                    },
+                    "timestamp": {
+                      "type": "string",
+                      "description": "Report generation timestamp"
+                    },
+                    "duration": {
+                      "type": "integer",
+                      "description": "Interview duration in seconds"
+                    },
+                    "overallScore": {
+                      "type": "number",
+                      "description": "Overall score out of 10"
+                    },
+                    "scores": {
+                      "type": "object",
+                      "description": "Individual criterion scores",
+                      "properties": {
+                        "technicalKnowledge": {
+                          "type": "number",
+                          "description": "Score for technical knowledge (0-10)"
+                        },
+                        "problemSolving": {
+                          "type": "number",
+                          "description": "Score for problem-solving skills (0-10)"
+                        },
+                        "communication": {
+                          "type": "number",
+                          "description": "Score for communication skills (0-10)"
+                        },
+                        "codeQuality": {
+                          "type": "number",
+                          "description": "Score for code quality (0-10)"
+                        },
+                        "culturalFit": {
+                          "type": "number",
+                          "description": "Score for cultural fit (0-10)"
+                        }
+                      }
+                    },
+                    "strengths": {
+                      "type": "array",
+                      "description": "List of candidate strengths",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "improvements": {
+                      "type": "array",
+                      "description": "Areas for improvement",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "recommendation": {
+                      "type": "string",
+                      "description": "Hiring recommendation",
+                      "enum": [
+                        "STRONG_HIRE",
+                        "HIRE",
+                        "BORDERLINE",
+                        "NO_HIRE",
+                        "STRONG_NO_HIRE"
+                      ]
+                    },
+                    "detailedFeedback": {
+                      "type": "string",
+                      "description": "Detailed narrative feedback"
+                    },
+                    "metrics": {
+                      "type": "object",
+                      "description": "Additional metrics",
+                      "properties": {
+                        "totalQuestions": {
+                          "type": "integer"
+                        },
+                        "codeSubmissions": {
+                          "type": "integer"
+                        },
+                        "averageResponseTime": {
+                          "type": "number"
+                        }
+                      }
+                    },
+                    "reportUrl": {
+                      "type": "string",
+                      "description": "S3 URL of the saved report (if saveToS3=true)"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

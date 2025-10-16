@@ -1,0 +1,128 @@
+{
+  "openapi": "3.0.0",
+  "info": {
+    "title": "CV Analyzer API",
+    "description": "Extract and analyze candidate resume/CV information",
+    "version": "1.0.0"
+  },
+  "paths": {
+    "/analyze": {
+      "post": {
+        "summary": "Analyze candidate CV/resume",
+        "description": "Extracts structured information from candidate's resume including skills, experience, education, and generates a summary. Can process PDF files from S3 or direct text input.",
+        "operationId": "analyzeCV",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "s3Bucket": {
+                    "type": "string",
+                    "description": "S3 bucket containing the CV file"
+                  },
+                  "s3Key": {
+                    "type": "string",
+                    "description": "S3 key (path) to the CV file"
+                  },
+                  "cvText": {
+                    "type": "string",
+                    "description": "Direct CV text input (alternative to S3)"
+                  },
+                  "extractSkills": {
+                    "type": "boolean",
+                    "description": "Whether to extract technical skills",
+                    "default": true
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "CV analyzed successfully",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "description": "Whether analysis was successful"
+                    },
+                    "candidateName": {
+                      "type": "string",
+                      "description": "Extracted candidate name"
+                    },
+                    "email": {
+                      "type": "string",
+                      "description": "Extracted email address"
+                    },
+                    "phone": {
+                      "type": "string",
+                      "description": "Extracted phone number"
+                    },
+                    "skills": {
+                      "type": "array",
+                      "description": "List of technical skills found",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "technologies": {
+                      "type": "array",
+                      "description": "List of technologies/tools",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "experience": {
+                      "type": "array",
+                      "description": "Work experience entries",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "duration": {
+                            "type": "string"
+                          },
+                          "context": {
+                            "type": "string"
+                          }
+                        }
+                      }
+                    },
+                    "education": {
+                      "type": "array",
+                      "description": "Education entries",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "degree": {
+                            "type": "string"
+                          },
+                          "context": {
+                            "type": "string"
+                          }
+                        }
+                      }
+                    },
+                    "totalYearsExperience": {
+                      "type": "number",
+                      "description": "Total years of professional experience"
+                    },
+                    "summary": {
+                      "type": "string",
+                      "description": "Brief summary of candidate profile"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

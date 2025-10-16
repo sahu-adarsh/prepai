@@ -657,16 +657,16 @@ Be professional, encouraging, and thorough.
 ### Phase 2: AI Agent Core (Day 2-3)
 
 **Bedrock Agent:**
-- [ ] Create Bedrock Agent with Claude
-- [ ] Write detailed agent instructions
-- [ ] Test basic conversational flow
-- [ ] Implement session state management
+- [x] Create Bedrock Agent with Claude
+- [x] Write detailed agent instructions
+- [x] Test basic conversational flow
+- [x] Implement session state management
 
 **Knowledge Base:**
-- [ ] Prepare interview question documents
-- [ ] Create Bedrock Knowledge Base
-- [ ] Connect Knowledge Base to Agent
-- [ ] Test RAG retrieval
+- [x] Prepare interview question documents
+- [x] Create Bedrock Knowledge Base
+- [x] Connect Knowledge Base to Agent
+- [x] Test RAG retrieval
 
 ### Phase 3: Tools & Action Groups (Day 3-4)
 

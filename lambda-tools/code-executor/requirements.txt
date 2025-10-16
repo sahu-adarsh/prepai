@@ -1,0 +1,5 @@
+# Code Executor Lambda Dependencies
+# Minimal dependencies for security
+
+# No external dependencies needed for basic Python execution
+# All required modules are in Python stdlib

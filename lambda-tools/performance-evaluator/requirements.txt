@@ -1,0 +1,7 @@
+# Performance Evaluator Lambda Dependencies
+
+# AWS SDK (included in Lambda runtime)
+boto3>=1.28.0
+
+# No additional dependencies needed
+# All logic uses Python stdlib

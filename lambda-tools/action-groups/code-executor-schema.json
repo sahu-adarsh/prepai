@@ -1,0 +1,129 @@
+{
+  "openapi": "3.0.0",
+  "info": {
+    "title": "Code Executor API",
+    "description": "Execute and validate candidate code submissions against test cases",
+    "version": "1.0.0"
+  },
+  "paths": {
+    "/execute": {
+      "post": {
+        "summary": "Execute code and run test cases",
+        "description": "Executes candidate's code in a sandboxed environment and validates against provided test cases. Supports Python programming language.",
+        "operationId": "executeCode",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "code": {
+                    "type": "string",
+                    "description": "The code to execute (Python)"
+                  },
+                  "language": {
+                    "type": "string",
+                    "description": "Programming language (python or javascript)",
+                    "enum": ["python", "javascript"],
+                    "default": "python"
+                  },
+                  "functionName": {
+                    "type": "string",
+                    "description": "Name of the function to test",
+                    "default": "solution"
+                  },
+                  "testCases": {
+                    "type": "array",
+                    "description": "Array of test cases to validate the code",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "input": {
+                          "type": "string",
+                          "description": "Test input as a string (will be evaluated)"
+                        },
+                        "expected": {
+                          "type": "string",
+                          "description": "Expected output as a string"
+                        }
+                      },
+                      "required": ["input", "expected"]
+                    }
+                  },
+                  "timeout": {
+                    "type": "integer",
+                    "description": "Maximum execution time in seconds",
+                    "default": 5
+                  }
+                },
+                "required": ["code"]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Code executed successfully",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "description": "Whether execution was successful"
+                    },
+                    "allTestsPassed": {
+                      "type": "boolean",
+                      "description": "Whether all test cases passed"
+                    },
+                    "testResults": {
+                      "type": "array",
+                      "description": "Results for each test case",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "testCase": {
+                            "type": "integer"
+                          },
+                          "passed": {
+                            "type": "boolean"
+                          },
+                          "input": {
+                            "type": "string"
+                          },
+                          "expected": {
+                            "type": "string"
+                          },
+                          "actual": {
+                            "type": "string"
+                          },
+                          "error": {
+                            "type": "string"
+                          }
+                        }
+                      }
+                    },
+                    "executionTime": {
+                      "type": "number",
+                      "description": "Execution time in seconds"
+                    },
+                    "output": {
+                      "type": "string",
+                      "description": "Output from the last test case"
+                    },
+                    "error": {
+                      "type": "string",
+                      "description": "Error message if execution failed"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}
