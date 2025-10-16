@@ -146,7 +146,7 @@ async def voice_interview_websocket(websocket: WebSocket, session_id: str):
             interview_type = session_data.get("interview_type", "Technical Interview") if session_data else "Technical Interview"
 
             # Create greeting prompt for the interviewer
-            greeting_prompt = f"Start the interview by introducing yourself as the interviewer and welcoming {candidate_name} to the {interview_type}. Keep it brief and professional."
+            greeting_prompt = f"Start the interview by introducing yourself (Alex Rivera) as the interviewer and welcoming {candidate_name} to the {interview_type}. Keep it brief and professional."
 
             print(f"[{datetime.now()}] Sending interviewer introduction...")
             full_response = ""

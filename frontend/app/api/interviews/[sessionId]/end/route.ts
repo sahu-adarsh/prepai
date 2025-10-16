@@ -3,12 +3,14 @@ import { NextRequest, NextResponse } from 'next/server';
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
 
 export async function POST(
-  request: NextRequest,
-  { params }: { params: { sessionId: string } }
+  _request: NextRequest,
+  { params }: { params: Promise<{ sessionId: string }> }
 ) {
   try {
+    const { sessionId } = await params;
+
     const response = await fetch(
-      `${API_URL}/api/interviews/${params.sessionId}/end`,
+      `${API_URL}/api/interviews/${sessionId}/end`,
       {
         method: 'POST',
         headers: {
