@@ -15,37 +15,54 @@ def lambda_handler(event, context):
     """
     Main Lambda handler for code execution
 
-    Event structure:
+    Bedrock Agent event structure:
     {
-        "code": "def solution(arr): return sorted(arr)",
-        "language": "python",
-        "testCases": [{"input": "[3, 1, 2]", "expected": "[1, 2, 3]"}],
-        "functionName": "solution",
-        "timeout": 5
+        "messageVersion": "1.0",
+        "agent": {...},
+        "actionGroup": "CodeExecutorGroup",
+        "apiPath": "/execute-code",
+        "httpMethod": "POST",
+        "parameters": [
+            {"name": "code", "value": "..."},
+            {"name": "language", "value": "python"},
+            ...
+        ],
+        "requestBody": {...}
     }
     """
 
     try:
-        # Parse event (from Bedrock Agent)
-        if isinstance(event, str):
-            event = json.loads(event)
+        # Check if this is a Bedrock Agent request or direct invocation
+        is_bedrock_agent = 'messageVersion' in event
+
+        if is_bedrock_agent:
+            # Extract parameters from Bedrock Agent format
+            parameters = {p['name']: p['value'] for p in event.get('parameters', [])}
+            request_body = event.get('requestBody', {}).get('content', {}).get('application/json', {})
+
+            # Merge parameters and request body
+            if isinstance(request_body, str):
+                request_body = json.loads(request_body)
+
+            params = {**request_body, **parameters}
+        else:
+            # Direct invocation format
+            params = event
 
         # Extract parameters
-        code = event.get('code', '')
-        language = event.get('language', 'python').lower()
-        test_cases = event.get('testCases', [])
-        function_name = event.get('functionName', 'solution')
-        timeout = event.get('timeout', 5)
+        code = params.get('code', '')
+        language = params.get('language', 'python').lower()
+        test_cases = params.get('testCases', [])
+        function_name = params.get('functionName', 'solution')
+        timeout = params.get('timeout', 5)
 
         # Validate inputs
         if not code:
-            return {
-                'statusCode': 400,
-                'body': json.dumps({
-                    'success': False,
-                    'error': 'Code is required'
-                })
+            error_response = {
+                'success': False,
+                'error': 'Code is required'
             }
+            return format_response(event, error_response, 400)
 
         # Execute code based on language
         if language == 'python':
@@ -53,27 +70,50 @@ def lambda_handler(event, context):
         elif language == 'javascript':
             result = execute_javascript(code, test_cases, function_name, timeout)
         else:
-            return {
-                'statusCode': 400,
-                'body': json.dumps({
-                    'success': False,
-                    'error': f'Unsupported language: {language}'
-                })
+            error_response = {
+                'success': False,
+                'error': f'Unsupported language: {language}'
             }
+            return format_response(event, error_response, 400)
 
-        return {
-            'statusCode': 200,
-            'body': json.dumps(result)
-        }
+        return format_response(event, result, 200)
 
     except Exception as e:
+        error_response = {
+            'success': False,
+            'error': f'Execution error: {str(e)}',
+            'traceback': traceback.format_exc()
+        }
+        return format_response(event, error_response, 500)
+
+
+def format_response(event: Dict, body: Dict, status_code: int = 200) -> Dict:
+    """
+    Format response for both Bedrock Agent and direct invocation
+    """
+    is_bedrock_agent = 'messageVersion' in event
+
+    if is_bedrock_agent:
+        # Bedrock Agent format
         return {
-            'statusCode': 500,
-            'body': json.dumps({
-                'success': False,
-                'error': f'Execution error: {str(e)}',
-                'traceback': traceback.format_exc()
-            })
+            "messageVersion": "1.0",
+            "response": {
+                "actionGroup": event.get('actionGroup', ''),
+                "apiPath": event.get('apiPath', ''),
+                "httpMethod": event.get('httpMethod', 'POST'),
+                "httpStatusCode": status_code,
+                "responseBody": {
+                    "application/json": {
+                        "body": json.dumps(body)
+                    }
+                }
+            }
+        }
+    else:
+        # Direct invocation format
+        return {
+            'statusCode': status_code,
+            'body': json.dumps(body)
         }
 
 

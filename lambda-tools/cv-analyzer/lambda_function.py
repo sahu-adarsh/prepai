@@ -17,54 +17,84 @@ def lambda_handler(event, context):
     """
     Main Lambda handler for CV analysis
 
-    Event structure:
-    {
-        "s3Bucket": "prepai-user-data",
-        "s3Key": "cvs/session123/resume.pdf",
-        "extractSkills": true,
-        "cvText": "optional direct text input"
-    }
+    Bedrock Agent event structure or direct invocation
     """
 
     try:
-        # Parse event
-        if isinstance(event, str):
-            event = json.loads(event)
+        # Check if this is a Bedrock Agent request or direct invocation
+        is_bedrock_agent = 'messageVersion' in event
+
+        if is_bedrock_agent:
+            # Extract parameters from Bedrock Agent format
+            parameters = {p['name']: p['value'] for p in event.get('parameters', [])}
+            request_body = event.get('requestBody', {}).get('content', {}).get('application/json', {})
+
+            # Merge parameters and request body
+            if isinstance(request_body, str):
+                request_body = json.loads(request_body)
+
+            params = {**request_body, **parameters}
+        else:
+            # Direct invocation format
+            params = event
 
         # Get CV text either from S3 or direct input
-        cv_text = event.get('cvText', '')
+        cv_text = params.get('cvText', '')
 
         if not cv_text:
-            s3_bucket = event.get('s3Bucket')
-            s3_key = event.get('s3Key')
+            s3_bucket = params.get('s3Bucket')
+            s3_key = params.get('s3Key')
 
             if not s3_bucket or not s3_key:
-                return {
-                    'statusCode': 400,
-                    'body': json.dumps({
-                        'success': False,
-                        'error': 'Either cvText or s3Bucket+s3Key required'
-                    })
+                error_response = {
+                    'success': False,
+                    'error': 'Either cvText or s3Bucket+s3Key required'
                 }
+                return format_response(event, error_response, 400)
 
             # Download CV from S3
             cv_text = download_cv_from_s3(s3_bucket, s3_key)
 
         # Analyze CV
-        analysis = analyze_cv_text(cv_text, event.get('extractSkills', True))
+        analysis = analyze_cv_text(cv_text, params.get('extractSkills', True))
 
-        return {
-            'statusCode': 200,
-            'body': json.dumps(analysis)
-        }
+        return format_response(event, analysis, 200)
 
     except Exception as e:
+        error_response = {
+            'success': False,
+            'error': f'Analysis error: {str(e)}'
+        }
+        return format_response(event, error_response, 500)
+
+
+def format_response(event: Dict, body: Dict, status_code: int = 200) -> Dict:
+    """
+    Format response for both Bedrock Agent and direct invocation
+    """
+    is_bedrock_agent = 'messageVersion' in event
+
+    if is_bedrock_agent:
+        # Bedrock Agent format
         return {
-            'statusCode': 500,
-            'body': json.dumps({
-                'success': False,
-                'error': f'Analysis error: {str(e)}'
-            })
+            "messageVersion": "1.0",
+            "response": {
+                "actionGroup": event.get('actionGroup', ''),
+                "apiPath": event.get('apiPath', ''),
+                "httpMethod": event.get('httpMethod', 'POST'),
+                "httpStatusCode": status_code,
+                "responseBody": {
+                    "application/json": {
+                        "body": json.dumps(body)
+                    }
+                }
+            }
+        }
+    else:
+        # Direct invocation format
+        return {
+            'statusCode': status_code,
+            'body': json.dumps(body)
         }
 
 

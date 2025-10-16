@@ -16,52 +16,79 @@ s3_client = boto3.client('s3')
 def lambda_handler(event, context):
     """
     Main Lambda handler for performance evaluation
-
-    Event structure:
-    {
-        "sessionId": "session123",
-        "conversationHistory": [...],
-        "codeSubmissions": [...],
-        "interviewType": "Google SDE",
-        "duration": 1800,
-        "candidateName": "John Doe"
-    }
+    Supports both Bedrock Agent and direct invocation
     """
 
     try:
-        # Parse event
-        if isinstance(event, str):
-            event = json.loads(event)
+        # Check if this is a Bedrock Agent request or direct invocation
+        is_bedrock_agent = 'messageVersion' in event
 
-        session_id = event.get('sessionId')
+        if is_bedrock_agent:
+            # Extract parameters from Bedrock Agent format
+            parameters = {p['name']: p['value'] for p in event.get('parameters', [])}
+            request_body = event.get('requestBody', {}).get('content', {}).get('application/json', {})
+
+            # Merge parameters and request body
+            if isinstance(request_body, str):
+                request_body = json.loads(request_body)
+
+            params = {**request_body, **parameters}
+        else:
+            # Direct invocation format
+            params = event
+
+        session_id = params.get('sessionId')
         if not session_id:
-            return {
-                'statusCode': 400,
-                'body': json.dumps({
-                    'success': False,
-                    'error': 'sessionId is required'
-                })
+            error_response = {
+                'success': False,
+                'error': 'sessionId is required'
             }
+            return format_response(event, error_response, 400)
 
         # Generate performance report
-        report = generate_performance_report(event)
+        report = generate_performance_report(params)
 
         # Save report to S3
-        if event.get('saveToS3', True):
+        if params.get('saveToS3', True):
             save_report_to_s3(session_id, report)
 
-        return {
-            'statusCode': 200,
-            'body': json.dumps(report)
-        }
+        return format_response(event, report, 200)
 
     except Exception as e:
+        error_response = {
+            'success': False,
+            'error': f'Evaluation error: {str(e)}'
+        }
+        return format_response(event, error_response, 500)
+
+
+def format_response(event: Dict, body: Dict, status_code: int = 200) -> Dict:
+    """
+    Format response for both Bedrock Agent and direct invocation
+    """
+    is_bedrock_agent = 'messageVersion' in event
+
+    if is_bedrock_agent:
+        # Bedrock Agent format
         return {
-            'statusCode': 500,
-            'body': json.dumps({
-                'success': False,
-                'error': f'Evaluation error: {str(e)}'
-            })
+            "messageVersion": "1.0",
+            "response": {
+                "actionGroup": event.get('actionGroup', ''),
+                "apiPath": event.get('apiPath', ''),
+                "httpMethod": event.get('httpMethod', 'POST'),
+                "httpStatusCode": status_code,
+                "responseBody": {
+                    "application/json": {
+                        "body": json.dumps(body)
+                    }
+                }
+            }
+        }
+    else:
+        # Direct invocation format
+        return {
+            'statusCode': status_code,
+            'body': json.dumps(body)
         }
 
 
