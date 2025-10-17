@@ -1,6 +1,6 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from app.routers import sessions, interviews, websocket
+from app.routers import sessions, interviews, websocket, code, analytics
 
 app = FastAPI(
     title="PrepAI Backend API",
@@ -25,6 +25,8 @@ app.add_middleware(
 app.include_router(sessions.router)
 app.include_router(interviews.router)
 app.include_router(websocket.router)
+app.include_router(code.router)
+app.include_router(analytics.router)
 
 @app.get("/")
 async def root():

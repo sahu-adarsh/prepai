@@ -3,6 +3,7 @@ from fastapi.responses import JSONResponse
 from app.models.session import TranscriptResponse, TranscriptMessage, EndSessionResponse
 from app.services.s3_service import S3Service
 from app.services.lambda_service import LambdaService
+from app.services.textract_service import TextractService, IndustrySkillExtractor
 from datetime import datetime
 from typing import Optional
 import json
@@ -10,6 +11,7 @@ import json
 router = APIRouter(prefix="/api/interviews", tags=["interviews"])
 s3_service = S3Service()
 lambda_service = LambdaService()
+textract_service = TextractService()
 
 @router.get("/{session_id}/transcript", response_model=TranscriptResponse)
 async def get_transcript(session_id: str):
@@ -97,7 +99,7 @@ async def end_interview(session_id: str):
 
 @router.post("/{session_id}/upload-cv")
 async def upload_cv(session_id: str, file: UploadFile = File(...)):
-    """Upload and analyze candidate CV"""
+    """Upload and analyze candidate CV with PDF/DOCX support"""
     try:
         session_data = s3_service.get_session(session_id)
 
@@ -106,39 +108,70 @@ async def upload_cv(session_id: str, file: UploadFile = File(...)):
 
         # Read file content
         content = await file.read()
+        file_extension = file.filename.lower().split('.')[-1]
 
-        # Upload to S3
-        s3_key = f"cvs/{session_id}/{file.filename}"
-        s3_bucket = "prepai-user-data"
+        # Extract text based on file type
+        cv_text = ""
 
-        # TODO: Upload to S3 using s3_service
-        # For now, analyze directly from content
+        if file_extension == 'pdf':
+            # Use Textract for PDF
+            cv_text = textract_service.extract_text_from_pdf(content)
+        elif file_extension in ['doc', 'docx']:
+            # Use Textract for DOCX
+            cv_text = textract_service.extract_text_from_pdf(content)  # Textract handles both
+        elif file_extension == 'txt':
+            # Direct text extraction
+            try:
+                cv_text = content.decode('utf-8')
+            except:
+                raise HTTPException(status_code=400, detail="Unable to decode text file")
+        else:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Unsupported file type: {file_extension}. Supported: PDF, DOCX, TXT"
+            )
 
-        # Convert bytes to text (simplified - production should handle PDF/DOCX)
-        try:
-            cv_text = content.decode('utf-8')
-        except:
-            raise HTTPException(status_code=400, detail="Unable to read CV. Please upload a text file.")
+        if not cv_text.strip():
+            raise HTTPException(status_code=400, detail="No text extracted from file")
 
         # Analyze CV using Lambda
         analysis = lambda_service.invoke_cv_analyzer(cv_text=cv_text)
+
+        # Extract industry-specific skills
+        interview_type = session_data.get("interview_type", "")
+        industry = "software_engineering"  # Default
+
+        if "solutions architect" in interview_type.lower() or "aws" in interview_type.lower():
+            industry = "cloud_architect"
+        elif "data" in interview_type.lower():
+            industry = "data_science"
+
+        categorized_skills = IndustrySkillExtractor.extract_skills_by_industry(cv_text, industry)
+
+        # Enhance analysis with categorized skills
+        analysis['categorized_skills'] = categorized_skills
+        analysis['industry'] = industry
+        analysis['file_type'] = file_extension
 
         # Save CV analysis to session
         session_data["cv_analysis"] = analysis
         session_data["cv_uploaded"] = True
         session_data["cv_filename"] = file.filename
+        session_data["cv_file_type"] = file_extension
         s3_service.save_session(session_data)
 
         return JSONResponse(content={
             "success": True,
             "analysis": analysis,
-            "message": "CV uploaded and analyzed successfully"
+            "message": f"CV uploaded and analyzed successfully ({file_extension.upper()})"
         })
 
     except HTTPException:
         raise
     except Exception as e:
         print(f"CV upload error: {e}")
+        import traceback
+        traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))
 
 

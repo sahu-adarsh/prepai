@@ -94,3 +94,24 @@ class S3Service:
         except Exception as e:
             print(f"Error uploading CV: {e}")
             return ""
+
+    def list_all_sessions(self) -> list:
+        """List all sessions from S3"""
+        try:
+            sessions = []
+            response = self.s3_client.list_objects_v2(
+                Bucket=self.bucket_name,
+                Prefix='sessions/'
+            )
+
+            for obj in response.get('Contents', []):
+                key = obj['Key']
+                if key.endswith('.json'):
+                    session_data = self.get_session(key.split('/')[-1].replace('.json', ''))
+                    if session_data:
+                        sessions.append(session_data)
+
+            return sessions
+        except Exception as e:
+            print(f"Error listing sessions: {e}")
+            return []
