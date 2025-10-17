@@ -15,7 +15,7 @@ Real-time voice-enabled AI interview preparation platform powered by AWS Bedrock
 - **Live Code Editor** - Monaco editor with code execution, test cases, and quality metrics
 - **CV Analysis** - PDF/DOCX parsing with AWS Textract and industry-specific skill extraction
 - **Performance Analytics** - Percentile benchmarks, trend analysis, and detailed reports
-- **AI Agent** - Claude 3.5 Haiku with 3 specialized Lambda action groups
+- **AI Agent** - Claude 3 Haiku with 3 specialized Lambda action groups
 
 ## Quick Start
 
@@ -43,7 +43,7 @@ sam deploy --guided --capabilities CAPABILITY_NAMED_IAM
 ```
 
 ### 4. Configure Bedrock Agent
-- Create agent with Claude 3.5 Haiku model
+- Create agent with Claude 3 Haiku model
 - Add action groups: `CodeExecutor`, `CVAnalyzer`, `PerformanceEvaluator`
 - Attach Lambda ARNs from SAM deployment output
 - Update agent instructions (see `condensed-agent-instructions.txt`)
@@ -58,19 +58,19 @@ sam deploy --guided --capabilities CAPABILITY_NAMED_IAM
                                              │
                  ┌───────────────────────────┼────────────────┐
                  │                           │                │
-            ┌────▼────┐              ┌──────▼─────┐   ┌──────▼──────┐
-            │ Bedrock │              │    S3      │   │   Lambda    │
-            │  Agent  │              │  Storage   │   │  Functions  │
-            └─────────┘              └────────────┘   └─────────────┘
+            ┌────▼────┐               ┌──────▼─────┐   ┌──────▼──────┐
+            │ Bedrock │               │    S3      │   │   Lambda    │
+            │  Agent  │               │  Storage   │   │  Functions  │
+            └─────────┘               └────────────┘   └─────────────┘
 ```
 
 ## Tech Stack
 
-**Frontend:** Next.js 15.5, React 19, TypeScript, TailwindCSS, Monaco Editor, Recharts
-**Backend:** FastAPI, Python 3.12, WebSockets, Boto3
-**AI/ML:** AWS Bedrock (Claude 3.5 Haiku), AWS Textract
-**Serverless:** AWS Lambda, SAM CLI
-**Storage:** AWS S3
+- **Frontend:** Next.js 15.5, React 19, TypeScript, TailwindCSS, Monaco Editor, Recharts
+- **Backend:** FastAPI, Python 3.12, WebSockets, Boto3
+- **AI/ML:** AWS Bedrock (Claude 3 Haiku), AWS Textract
+- **Serverless:** AWS Lambda, SAM CLI
+- **Storage:** AWS S3
 
 ## Demo Pages
 
@@ -81,11 +81,11 @@ Visit `http://localhost:3000/demo` to explore:
 
 ## API Endpoints
 
-**Sessions:** `POST /api/sessions`, `GET /api/sessions/{id}`, `DELETE /api/sessions/{id}`
-**Interviews:** `POST /api/interviews/{id}/start`, `POST /api/interviews/{id}/upload-cv`
-**Code:** `POST /api/code/execute`, `GET /api/code/{id}/submissions`
-**Analytics:** `GET /api/analytics/aggregate`, `GET /api/analytics/benchmarks/{type}`
-**WebSocket:** `ws://localhost:8000/ws/{session_id}`
+- **Sessions:** `POST /api/sessions`, `GET /api/sessions/{id}`, `DELETE /api/sessions/{id}`
+- **Interviews:** `POST /api/interviews/{id}/start`, `POST /api/interviews/{id}/upload-cv`
+- **Code:** `POST /api/code/execute`, `GET /api/code/{id}/submissions`
+- **Analytics:** `GET /api/analytics/aggregate`, `GET /api/analytics/benchmarks/{type}`
+- **WebSocket:** `ws://localhost:8000/ws/{session_id}`
 
 ## Configuration
 
