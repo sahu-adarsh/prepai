@@ -30,6 +30,7 @@ export default function VoiceInterview({ sessionId, interviewType, candidateName
   const audioContextRef = useRef<AudioContext | null>(null);
   const audioQueueRef = useRef<ArrayBuffer[]>([]);
   const isPlayingRef = useRef(false);
+  const currentAudioSourceRef = useRef<AudioBufferSourceNode | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
@@ -174,6 +175,9 @@ export default function VoiceInterview({ sessionId, interviewType, candidateName
             isSpeaking = true;
             setIsRecording(true);
 
+            // Stop any currently playing audio when user starts speaking
+            stopAudioPlayback();
+
             if (wsRef.current?.readyState === WebSocket.OPEN) {
               wsRef.current.send(JSON.stringify({ type: 'speech_start' }));
             }
@@ -209,9 +213,28 @@ export default function VoiceInterview({ sessionId, interviewType, candidateName
     }
   };
 
+  const stopAudioPlayback = () => {
+    // Stop currently playing audio
+    if (currentAudioSourceRef.current) {
+      try {
+        currentAudioSourceRef.current.stop();
+        currentAudioSourceRef.current.disconnect();
+      } catch (err) {
+        // Audio source may already be stopped
+        console.log('Error stopping audio source:', err);
+      }
+      currentAudioSourceRef.current = null;
+    }
+
+    // Clear the audio queue
+    audioQueueRef.current = [];
+    isPlayingRef.current = false;
+  };
+
   const playNextAudioChunk = async () => {
     if (audioQueueRef.current.length === 0) {
       isPlayingRef.current = false;
+      currentAudioSourceRef.current = null;
       return;
     }
 
@@ -234,13 +257,18 @@ export default function VoiceInterview({ sessionId, interviewType, candidateName
       source.buffer = buffer;
       source.connect(context.destination);
 
+      // Store reference to current audio source
+      currentAudioSourceRef.current = source;
+
       source.onended = () => {
+        currentAudioSourceRef.current = null;
         playNextAudioChunk();
       };
 
       source.start();
     } catch (err) {
       setError('Failed to play audio: ' + (err as Error).message);
+      currentAudioSourceRef.current = null;
       playNextAudioChunk();
     }
   };

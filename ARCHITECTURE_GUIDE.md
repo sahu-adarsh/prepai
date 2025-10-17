@@ -826,7 +826,7 @@ Runtime: Python 3.11
 ```yaml
 Agent:
   Name: PrepAI Interview Agent
-  Model: Claude 3.5 Haiku
+  Model: Claude 3 Haiku
   Streaming: Enabled
 
 Knowledge Base:
