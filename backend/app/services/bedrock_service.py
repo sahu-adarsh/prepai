@@ -5,6 +5,7 @@ from typing import Dict, Any, Optional, List, Generator
 from botocore.config import Config
 from botocore.exceptions import ClientError
 from app.config import AWS_REGION, AWS_ACCESS_KEY, AWS_SECRET_ACCESS_KEY, BEDROCK_AGENT_ID, BEDROCK_AGENT_ALIAS_ID
+from app.config.interview_types import get_interview_config, INTERVIEW_PHASES
 
 class BedrockService:
     def __init__(self):
@@ -129,15 +130,34 @@ class BedrockService:
         retry_count = 0
         base_delay = 0.5  # Start with 500ms delay
 
-        # Build session state for Bedrock Agent
+        # Build enhanced session state for Bedrock Agent
         session_attributes = {}
         if session_state:
-            # Pass interview context to agent
+            interview_type = session_state.get("interviewType", "")
+
+            # Get interview configuration based on type
+            interview_config = get_interview_config(interview_type)
+
+            # Build comprehensive session attributes
             session_attributes = {
-                "interview_type": session_state.get("interviewType", ""),
+                # Basic session info
+                "interview_type": interview_type,
                 "candidate_name": session_state.get("candidateName", ""),
-                "resume_summary": session_state.get("resumeSummary", ""),
-                "turn_count": str(session_state.get("turnCount", 0))
+                "resume_summary": session_state.get("resumeSummary", "Not provided"),
+                "turn_count": str(session_state.get("turnCount", 0)),
+
+                # Interview configuration (from interview_types.py)
+                "focus_areas": interview_config.get("focus_areas", ""),
+                "key_topics": interview_config.get("key_topics", ""),
+                "difficulty_range": interview_config.get("difficulty_range", "medium"),
+                "evaluation_weight": interview_config.get("evaluation_weight", ""),
+
+                # Current phase tracking
+                "current_phase": session_state.get("currentPhase", "introduction"),
+                "difficulty_level": session_state.get("difficultyLevel", "medium"),
+
+                # Performance tracking (optional)
+                "performance_score": str(session_state.get("performanceScore", 5)),
             }
 
         while retry_count <= max_retries:

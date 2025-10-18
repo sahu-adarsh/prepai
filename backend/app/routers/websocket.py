@@ -19,6 +19,55 @@ router = APIRouter()
 whisper_model = None
 tts_model = None
 
+
+def clean_agent_response(text: str) -> str:
+    """
+    Clean agent response by removing stage directions and formatting issues.
+
+    Removes:
+    - Stage directions like "*smiling*", "*in a friendly tone*"
+    - Text in asterisks or within parentheses that describe tone
+    - Extra whitespace
+
+    Args:
+        text: Raw text from agent
+
+    Returns:
+        Cleaned text suitable for TTS
+    """
+    if not text:
+        return text
+
+    # Remove text within asterisks (stage directions)
+    # Pattern: *anything* including multi-word phrases
+    cleaned = re.sub(r'\*[^*]+\*', '', text)
+
+    # Remove text within parentheses that looks like stage directions
+    # Pattern: (in a X tone), (friendly), etc.
+    cleaned = re.sub(r'\([^)]*tone[^)]*\)', '', cleaned, flags=re.IGNORECASE)
+    cleaned = re.sub(r'\([^)]*smiling[^)]*\)', '', cleaned, flags=re.IGNORECASE)
+    cleaned = re.sub(r'\([^)]*warmly[^)]*\)', '', cleaned, flags=re.IGNORECASE)
+
+    # Remove common stage direction phrases even without markers
+    stage_direction_patterns = [
+        r'in a \w+ tone,?\s*',
+        r'with a \w+ voice,?\s*',
+        r'warmly,?\s*',
+        r'friendly,?\s*',
+        r'professionally,?\s*',
+    ]
+    for pattern in stage_direction_patterns:
+        cleaned = re.sub(pattern, '', cleaned, flags=re.IGNORECASE)
+
+    # Clean up extra whitespace
+    cleaned = re.sub(r'\s+', ' ', cleaned)
+    cleaned = cleaned.strip()
+
+    # Remove leading/trailing punctuation artifacts
+    cleaned = re.sub(r'^[,\s]+', '', cleaned)
+
+    return cleaned
+
 def get_whisper_model():
     global whisper_model
     if whisper_model is None:
@@ -198,18 +247,24 @@ async def voice_interview_websocket(websocket: WebSocket, session_id: str):
                             for sentence in sentences[:-1]:
                                 sentence = sentence.strip()
                                 if sentence:
-                                    audio_bytes = await text_to_speech(sentence)
-                                    if len(audio_bytes) > 44:  # More than WAV header
-                                        await websocket.send_bytes(audio_bytes)
+                                    # Clean stage directions before TTS
+                                    cleaned_sentence = clean_agent_response(sentence)
+                                    if cleaned_sentence:  # Only generate TTS if there's content after cleaning
+                                        audio_bytes = await text_to_speech(cleaned_sentence)
+                                        if len(audio_bytes) > 44:  # More than WAV header
+                                            await websocket.send_bytes(audio_bytes)
 
                             # Keep incomplete fragment
                             text_buffer = sentences[-1] if sentences else ""
 
                 # Process remaining text
                 if text_buffer.strip():
-                    audio_bytes = await text_to_speech(text_buffer)
-                    if len(audio_bytes) > 44:
-                        await websocket.send_bytes(audio_bytes)
+                    # Clean stage directions before TTS
+                    cleaned_text = clean_agent_response(text_buffer)
+                    if cleaned_text:  # Only generate TTS if there's content after cleaning
+                        audio_bytes = await text_to_speech(cleaned_text)
+                        if len(audio_bytes) > 44:
+                            await websocket.send_bytes(audio_bytes)
 
             except Exception as e:
                 print(f"Bedrock Agent error during introduction: {e}")
@@ -292,8 +347,23 @@ async def voice_interview_websocket(websocket: WebSocket, session_id: str):
             sentence_endings = re.compile(r'[.!?]\s*')
 
             try:
-                event_stream = bedrock_service.invoke_agent(session_id, transcript)
-                print(f"[{datetime.now()}] Bedrock Agent invoked")
+                # Get session state to pass interview configuration to Bedrock
+                session_data = s3_service.get_session(session_id)
+                session_state_for_bedrock = {
+                    "interviewType": session_data.get("interview_type", "Technical Interview") if session_data else "Technical Interview",
+                    "candidateName": session_data.get("candidate_name", "candidate") if session_data else "candidate",
+                    "resumeSummary": session_data.get("resume_summary", "Not provided") if session_data else "Not provided",
+                    "turnCount": 0,  # You can track this if needed
+                    "currentPhase": "technical",  # Track interview phase
+                    "difficultyLevel": "medium"  # Adapt based on performance
+                }
+
+                event_stream = bedrock_service.invoke_agent(
+                    session_id=session_id,
+                    input_text=transcript,
+                    session_state=session_state_for_bedrock
+                )
+                print(f"[{datetime.now()}] Bedrock Agent invoked with session state")
 
                 for event in event_stream:
                     if 'chunk' in event:
@@ -315,18 +385,24 @@ async def voice_interview_websocket(websocket: WebSocket, session_id: str):
                             for sentence in sentences[:-1]:
                                 sentence = sentence.strip()
                                 if sentence:
-                                    audio_bytes = await text_to_speech(sentence)
-                                    if len(audio_bytes) > 44:  # More than WAV header
-                                        await websocket.send_bytes(audio_bytes)
+                                    # Clean stage directions before TTS
+                                    cleaned_sentence = clean_agent_response(sentence)
+                                    if cleaned_sentence:  # Only generate TTS if there's content after cleaning
+                                        audio_bytes = await text_to_speech(cleaned_sentence)
+                                        if len(audio_bytes) > 44:  # More than WAV header
+                                            await websocket.send_bytes(audio_bytes)
 
                             # Keep incomplete fragment
                             text_buffer = sentences[-1] if sentences else ""
 
                 # Process remaining text
                 if text_buffer.strip():
-                    audio_bytes = await text_to_speech(text_buffer)
-                    if len(audio_bytes) > 44:
-                        await websocket.send_bytes(audio_bytes)
+                    # Clean stage directions before TTS
+                    cleaned_text = clean_agent_response(text_buffer)
+                    if cleaned_text:  # Only generate TTS if there's content after cleaning
+                        audio_bytes = await text_to_speech(cleaned_text)
+                        if len(audio_bytes) > 44:
+                            await websocket.send_bytes(audio_bytes)
 
             except Exception as e:
                 print(f"Bedrock Agent error: {e}")
