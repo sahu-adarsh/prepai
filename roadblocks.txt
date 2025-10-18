@@ -1,6 +1,15 @@
-#1 Throttling error
+fix#1 Throttling error
 AI processing error: An error occurred (throttlingException) when calling the InvokeAgent operation: Your request rate is too high. Reduce the frequency of requests. Check your Bedrock model invocation quotas to find the acceptable frequency.
 
-#2 Initial connection/authentication to AWS Bedrock
+fix#2 Initial connection/authentication to AWS Bedrock
 Fix: Connection Pooling + Keep-Alive
 
+perf#3 Reduce initial greeting delay from 5-10s to 1-2s
+Optimize WebSocket connection and greeting flow to provide faster interview start:
+- Accept WebSocket connection before initializing models
+- Replace Bedrock Agent greeting with fast template-based response
+- Move S3 operations to async background tasks
+
+perf#4 optimize Bedrock agent with session attributes and response filtering
+- Reduce agent prompt from 1,289 to 230 words by moving interview configs to session attributes. 
+Improves response time by 10-15% (6-8s → 5.5-7.5s).

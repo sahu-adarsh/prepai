@@ -19,6 +19,55 @@ router = APIRouter()
 whisper_model = None
 tts_model = None
 
+
+def clean_agent_response(text: str) -> str:
+    """
+    Clean agent response by removing stage directions and formatting issues.
+
+    Removes:
+    - Stage directions like "*smiling*", "*in a friendly tone*"
+    - Text in asterisks or within parentheses that describe tone
+    - Extra whitespace
+
+    Args:
+        text: Raw text from agent
+
+    Returns:
+        Cleaned text suitable for TTS
+    """
+    if not text:
+        return text
+
+    # Remove text within asterisks (stage directions)
+    # Pattern: *anything* including multi-word phrases
+    cleaned = re.sub(r'\*[^*]+\*', '', text)
+
+    # Remove text within parentheses that looks like stage directions
+    # Pattern: (in a X tone), (friendly), etc.
+    cleaned = re.sub(r'\([^)]*tone[^)]*\)', '', cleaned, flags=re.IGNORECASE)
+    cleaned = re.sub(r'\([^)]*smiling[^)]*\)', '', cleaned, flags=re.IGNORECASE)
+    cleaned = re.sub(r'\([^)]*warmly[^)]*\)', '', cleaned, flags=re.IGNORECASE)
+
+    # Remove common stage direction phrases even without markers
+    stage_direction_patterns = [
+        r'in a \w+ tone,?\s*',
+        r'with a \w+ voice,?\s*',
+        r'warmly,?\s*',
+        r'friendly,?\s*',
+        r'professionally,?\s*',
+    ]
+    for pattern in stage_direction_patterns:
+        cleaned = re.sub(pattern, '', cleaned, flags=re.IGNORECASE)
+
+    # Clean up extra whitespace
+    cleaned = re.sub(r'\s+', ' ', cleaned)
+    cleaned = cleaned.strip()
+
+    # Remove leading/trailing punctuation artifacts
+    cleaned = re.sub(r'^[,\s]+', '', cleaned)
+
+    return cleaned
+
 def get_whisper_model():
     global whisper_model
     if whisper_model is None:
@@ -40,11 +89,12 @@ async def voice_interview_websocket(websocket: WebSocket, session_id: str):
     Handles: Audio streaming, Speech-to-Text, LLM interaction, Text-to-Speech
     """
     try:
-        # Initialize models BEFORE accepting connection
+        # Accept connection FIRST for faster perceived performance
+        await websocket.accept()
+
+        # Initialize models AFTER accepting connection (in background)
         whisper = get_whisper_model()
         tts = get_tts_model()
-
-        await websocket.accept()
 
         # Initialize services
         bedrock_service = BedrockService()
@@ -140,14 +190,34 @@ async def voice_interview_websocket(websocket: WebSocket, session_id: str):
         processing = True
 
         try:
-            # Get session data to personalize greeting
-            session_data = s3_service.get_session(session_id)
+            # Fetch session data asynchronously to avoid blocking
+            session_data = await asyncio.to_thread(s3_service.get_session, session_id)
             candidate_name = session_data.get("candidate_name", "candidate") if session_data else "candidate"
             interview_type = session_data.get("interview_type", "Technical Interview") if session_data else "Technical Interview"
 
-            # Create greeting prompt for the interviewer
-            greeting_prompt = f"Start the interview by introducing yourself (Alex Rivera) as the interviewer and welcoming {candidate_name} to the {interview_type}. Keep it brief and professional."
+            # Use a simple, fast greeting without Bedrock for instant response
+            # This eliminates the 2-5 second Bedrock cold start delay
+            greeting_text = f"Hello {candidate_name}, I'm Alex Rivera, your interviewer for today's {interview_type}. Let's begin. Please tell me about yourself."
 
+            print(f"[{datetime.now()}] Sending fast introduction...")
+
+            # Send text immediately
+            await websocket.send_json({
+                "type": "llm_chunk",
+                "text": greeting_text
+            })
+
+            # Generate TTS for the greeting
+            audio_bytes = await text_to_speech(greeting_text)
+            if len(audio_bytes) > 44:
+                await websocket.send_bytes(audio_bytes)
+
+            full_response = greeting_text
+
+            # Alternative: Use Bedrock if you need dynamic greetings (slower but more personalized)
+            # Uncomment below to use Bedrock Agent instead
+            """
+            greeting_prompt = f"Start the interview by introducing yourself (Alex Rivera) as the interviewer and welcoming {candidate_name} to the {interview_type}. Keep it brief and professional."
             print(f"[{datetime.now()}] Sending interviewer introduction...")
             full_response = ""
             text_buffer = ""
@@ -177,18 +247,24 @@ async def voice_interview_websocket(websocket: WebSocket, session_id: str):
                             for sentence in sentences[:-1]:
                                 sentence = sentence.strip()
                                 if sentence:
-                                    audio_bytes = await text_to_speech(sentence)
-                                    if len(audio_bytes) > 44:  # More than WAV header
-                                        await websocket.send_bytes(audio_bytes)
+                                    # Clean stage directions before TTS
+                                    cleaned_sentence = clean_agent_response(sentence)
+                                    if cleaned_sentence:  # Only generate TTS if there's content after cleaning
+                                        audio_bytes = await text_to_speech(cleaned_sentence)
+                                        if len(audio_bytes) > 44:  # More than WAV header
+                                            await websocket.send_bytes(audio_bytes)
 
                             # Keep incomplete fragment
                             text_buffer = sentences[-1] if sentences else ""
 
                 # Process remaining text
                 if text_buffer.strip():
-                    audio_bytes = await text_to_speech(text_buffer)
-                    if len(audio_bytes) > 44:
-                        await websocket.send_bytes(audio_bytes)
+                    # Clean stage directions before TTS
+                    cleaned_text = clean_agent_response(text_buffer)
+                    if cleaned_text:  # Only generate TTS if there's content after cleaning
+                        audio_bytes = await text_to_speech(cleaned_text)
+                        if len(audio_bytes) > 44:
+                            await websocket.send_bytes(audio_bytes)
 
             except Exception as e:
                 print(f"Bedrock Agent error during introduction: {e}")
@@ -197,6 +273,7 @@ async def voice_interview_websocket(websocket: WebSocket, session_id: str):
                 audio_bytes = await text_to_speech(full_response)
                 if len(audio_bytes) > 44:
                     await websocket.send_bytes(audio_bytes)
+            """
 
             # Signal completion
             await websocket.send_json({
@@ -205,12 +282,16 @@ async def voice_interview_websocket(websocket: WebSocket, session_id: str):
                 "role": "assistant"
             })
 
-            # Save introduction to transcript
-            s3_service.update_session_transcript(session_id, {
-                "role": "assistant",
-                "content": full_response,
-                "timestamp": datetime.utcnow().isoformat()
-            })
+            # Save introduction to transcript in background (non-blocking)
+            asyncio.create_task(asyncio.to_thread(
+                s3_service.update_session_transcript,
+                session_id,
+                {
+                    "role": "assistant",
+                    "content": full_response,
+                    "timestamp": datetime.utcnow().isoformat()
+                }
+            ))
 
         except Exception as e:
             print(f"Error sending introduction: {e}")
@@ -264,10 +345,26 @@ async def voice_interview_websocket(websocket: WebSocket, session_id: str):
             full_response = ""
             text_buffer = ""
             sentence_endings = re.compile(r'[.!?]\s*')
+            coding_question_detected = False
 
             try:
-                event_stream = bedrock_service.invoke_agent(session_id, transcript)
-                print(f"[{datetime.now()}] Bedrock Agent invoked")
+                # Get session state to pass interview configuration to Bedrock
+                session_data = s3_service.get_session(session_id)
+                session_state_for_bedrock = {
+                    "interviewType": session_data.get("interview_type", "Technical Interview") if session_data else "Technical Interview",
+                    "candidateName": session_data.get("candidate_name", "candidate") if session_data else "candidate",
+                    "resumeSummary": session_data.get("resume_summary", "Not provided") if session_data else "Not provided",
+                    "turnCount": 0,  # You can track this if needed
+                    "currentPhase": "technical",  # Track interview phase
+                    "difficultyLevel": "medium"  # Adapt based on performance
+                }
+
+                event_stream = bedrock_service.invoke_agent(
+                    session_id=session_id,
+                    input_text=transcript,
+                    session_state=session_state_for_bedrock
+                )
+                print(f"[{datetime.now()}] Bedrock Agent invoked with session state")
 
                 for event in event_stream:
                     if 'chunk' in event:
@@ -289,18 +386,24 @@ async def voice_interview_websocket(websocket: WebSocket, session_id: str):
                             for sentence in sentences[:-1]:
                                 sentence = sentence.strip()
                                 if sentence:
-                                    audio_bytes = await text_to_speech(sentence)
-                                    if len(audio_bytes) > 44:  # More than WAV header
-                                        await websocket.send_bytes(audio_bytes)
+                                    # Clean stage directions before TTS
+                                    cleaned_sentence = clean_agent_response(sentence)
+                                    if cleaned_sentence:  # Only generate TTS if there's content after cleaning
+                                        audio_bytes = await text_to_speech(cleaned_sentence)
+                                        if len(audio_bytes) > 44:  # More than WAV header
+                                            await websocket.send_bytes(audio_bytes)
 
                             # Keep incomplete fragment
                             text_buffer = sentences[-1] if sentences else ""
 
                 # Process remaining text
                 if text_buffer.strip():
-                    audio_bytes = await text_to_speech(text_buffer)
-                    if len(audio_bytes) > 44:
-                        await websocket.send_bytes(audio_bytes)
+                    # Clean stage directions before TTS
+                    cleaned_text = clean_agent_response(text_buffer)
+                    if cleaned_text:  # Only generate TTS if there's content after cleaning
+                        audio_bytes = await text_to_speech(cleaned_text)
+                        if len(audio_bytes) > 44:
+                            await websocket.send_bytes(audio_bytes)
 
             except Exception as e:
                 print(f"Bedrock Agent error: {e}")
@@ -311,12 +414,38 @@ async def voice_interview_websocket(websocket: WebSocket, session_id: str):
                 })
                 full_response = "I apologize, but I encountered an error processing your response."
 
+            # Detect coding question patterns in the response
+            coding_keywords = [
+                'write a function', 'implement', 'code', 'algorithm',
+                'write code', 'solve this problem', 'coding problem',
+                'programming challenge', 'leetcode', 'code editor',
+                'function that', 'write a program', 'implement a solution'
+            ]
+
+            full_response_lower = full_response.lower()
+            coding_question_detected = any(keyword in full_response_lower for keyword in coding_keywords)
+
             # Signal completion
             await websocket.send_json({
                 "type": "assistant_complete",
                 "text": full_response,
                 "role": "assistant"
             })
+
+            # If coding question detected, send coding_question signal
+            if coding_question_detected:
+                print(f"[{session_id}] Coding question detected in response")
+
+                # Extract coding question details (you can enhance this with NLP)
+                # For now, we'll send a simple notification
+                await websocket.send_json({
+                    "type": "coding_question",
+                    "question": full_response,
+                    "language": "javascript",  # Default language
+                    "testCases": [],  # You can populate this based on the question
+                    "initialCode": "// Write your code here\nfunction solution() {\n  // Your implementation\n  return null;\n}\n"
+                })
+                print(f"[{session_id}] Code editor signal sent to frontend")
 
             # Save assistant response to transcript
             s3_service.update_session_transcript(session_id, {
