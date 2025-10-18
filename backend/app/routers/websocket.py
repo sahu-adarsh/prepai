@@ -345,6 +345,7 @@ async def voice_interview_websocket(websocket: WebSocket, session_id: str):
             full_response = ""
             text_buffer = ""
             sentence_endings = re.compile(r'[.!?]\s*')
+            coding_question_detected = False
 
             try:
                 # Get session state to pass interview configuration to Bedrock
@@ -413,12 +414,38 @@ async def voice_interview_websocket(websocket: WebSocket, session_id: str):
                 })
                 full_response = "I apologize, but I encountered an error processing your response."
 
+            # Detect coding question patterns in the response
+            coding_keywords = [
+                'write a function', 'implement', 'code', 'algorithm',
+                'write code', 'solve this problem', 'coding problem',
+                'programming challenge', 'leetcode', 'code editor',
+                'function that', 'write a program', 'implement a solution'
+            ]
+
+            full_response_lower = full_response.lower()
+            coding_question_detected = any(keyword in full_response_lower for keyword in coding_keywords)
+
             # Signal completion
             await websocket.send_json({
                 "type": "assistant_complete",
                 "text": full_response,
                 "role": "assistant"
             })
+
+            # If coding question detected, send coding_question signal
+            if coding_question_detected:
+                print(f"[{session_id}] Coding question detected in response")
+
+                # Extract coding question details (you can enhance this with NLP)
+                # For now, we'll send a simple notification
+                await websocket.send_json({
+                    "type": "coding_question",
+                    "question": full_response,
+                    "language": "javascript",  # Default language
+                    "testCases": [],  # You can populate this based on the question
+                    "initialCode": "// Write your code here\nfunction solution() {\n  // Your implementation\n  return null;\n}\n"
+                })
+                print(f"[{session_id}] Code editor signal sent to frontend")
 
             # Save assistant response to transcript
             s3_service.update_session_transcript(session_id, {

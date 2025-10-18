@@ -2,6 +2,10 @@
 
 import { useState, useRef, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
+import dynamic from 'next/dynamic';
+
+// Dynamically import CodeEditor to avoid SSR issues
+const CodeEditor = dynamic(() => import('./code-editor/CodeEditor'), { ssr: false });
 
 type Message = {
   role: 'user' | 'assistant';
@@ -25,6 +29,13 @@ export default function VoiceInterview({ sessionId, interviewType, candidateName
   const [isRecording, setIsRecording] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
   const [timeElapsed, setTimeElapsed] = useState(0);
+  const [showCodeEditor, setShowCodeEditor] = useState(false);
+  const [codingQuestion, setCodingQuestion] = useState<{
+    question: string;
+    language?: string;
+    testCases?: Array<{ input: string; expected: string }>;
+    initialCode?: string;
+  } | null>(null);
 
   const wsRef = useRef<WebSocket | null>(null);
   const audioContextRef = useRef<AudioContext | null>(null);
@@ -74,6 +85,16 @@ export default function VoiceInterview({ sessionId, interviewType, candidateName
           setMessages(prev => [...prev, { role: 'assistant', content: data.text, timestamp: new Date() }]);
           setCurrentResponse('');
           setIsProcessing(false);
+        } else if (data.type === 'coding_question') {
+          // Coding question detected - show code editor
+          console.log('Coding question detected:', data);
+          setShowCodeEditor(true);
+          setCodingQuestion({
+            question: data.question || data.text || '',
+            language: data.language || 'javascript',
+            testCases: data.testCases || [],
+            initialCode: data.initialCode || ''
+          });
         } else if (data.type === 'error') {
           setError(data.message);
           setIsProcessing(false);
@@ -370,57 +391,104 @@ export default function VoiceInterview({ sessionId, interviewType, candidateName
           </div>
         </div>
 
-        {/* Voice Control Panel (Right) */}
-        <div className="w-1/2 flex flex-col items-center justify-center p-8 bg-gradient-to-br from-blue-50 to-indigo-50">
-          <h1 className="text-3xl font-bold mb-8 text-gray-900">Voice Interview</h1>
-
-          {/* Status Indicator */}
-          <div className={`w-48 h-48 rounded-full flex items-center justify-center transition-all shadow-lg ${
-            isRecording
-              ? 'bg-green-500 animate-pulse ring-4 ring-green-400'
-              : isProcessing
-              ? 'bg-blue-500 animate-pulse'
-              : 'bg-gray-400'
-          }`}>
-            <div className="text-center text-white">
-              <div className="text-6xl mb-2">
-                {isRecording ? '🎙️' : isProcessing ? '🤖' : '👤'}
+        {/* Right Panel - Voice Control or Code Editor */}
+        <div className="w-1/2 flex flex-col bg-white">
+          {showCodeEditor && codingQuestion ? (
+            // Code Editor Panel
+            <div className="flex flex-col h-full">
+              <div className="p-4 bg-gray-800 border-b border-gray-700 flex items-center justify-between">
+                <h2 className="text-lg font-semibold text-white">Code Editor</h2>
+                <button
+                  onClick={() => setShowCodeEditor(false)}
+                  className="px-3 py-1 text-sm bg-gray-700 text-gray-200 rounded hover:bg-gray-600 transition-colors"
+                >
+                  Hide Editor
+                </button>
               </div>
-              <div className="text-sm font-semibold">
-                {isRecording ? 'You are speaking' : isProcessing ? 'Interviewer responding' : 'Ready to listen'}
+
+              {/* Coding Question Display */}
+              {codingQuestion.question && (
+                <div className="p-4 bg-blue-50 border-b border-blue-200">
+                  <h3 className="text-sm font-semibold text-blue-900 mb-2">Problem Statement:</h3>
+                  <p className="text-sm text-gray-800 whitespace-pre-wrap">{codingQuestion.question}</p>
+                </div>
+              )}
+
+              {/* Code Editor Component */}
+              <div className="flex-1 min-h-0">
+                <CodeEditor
+                  sessionId={sessionId}
+                  initialCode={codingQuestion.initialCode}
+                  language={codingQuestion.language}
+                  testCases={codingQuestion.testCases}
+                  onCodeSubmit={(code, result) => {
+                    console.log('Code submitted:', code, result);
+                    // You can send results back via WebSocket if needed
+                    if (wsRef.current?.readyState === WebSocket.OPEN) {
+                      wsRef.current.send(JSON.stringify({
+                        type: 'code_submission',
+                        code,
+                        result
+                      }));
+                    }
+                  }}
+                />
               </div>
             </div>
-          </div>
+          ) : (
+            // Voice Control Panel
+            <div className="flex flex-col items-center justify-center p-8 bg-gradient-to-br from-blue-50 to-indigo-50 h-full">
+              <h1 className="text-3xl font-bold mb-8 text-gray-900">Voice Interview</h1>
 
-          {isActive && (
-            <div className="mt-6 text-center space-y-2">
-              <p className="text-lg font-medium text-gray-700">
-                {isRecording ? '🟢 Listening to your response...' : isProcessing ? '💭 Interviewer is thinking...' : '⚪ Speak when you\'re ready'}
-              </p>
-            </div>
-          )}
+              {/* Status Indicator */}
+              <div className={`w-48 h-48 rounded-full flex items-center justify-center transition-all shadow-lg ${
+                isRecording
+                  ? 'bg-green-500 animate-pulse ring-4 ring-green-400'
+                  : isProcessing
+                  ? 'bg-blue-500 animate-pulse'
+                  : 'bg-gray-400'
+              }`}>
+                <div className="text-center text-white">
+                  <div className="text-6xl mb-2">
+                    {isRecording ? '🎙️' : isProcessing ? '🤖' : '👤'}
+                  </div>
+                  <div className="text-sm font-semibold">
+                    {isRecording ? 'You are speaking' : isProcessing ? 'Interviewer responding' : 'Ready to listen'}
+                  </div>
+                </div>
+              </div>
 
-          {!isActive && !error && (
-            <div className="mt-6 text-center space-y-2">
-              <p className="text-lg font-medium text-blue-600 animate-pulse">
-                🔄 Initializing interview...
-              </p>
-              <p className="text-sm text-gray-600">
-                Please allow microphone access when prompted
-              </p>
-            </div>
-          )}
+              {isActive && (
+                <div className="mt-6 text-center space-y-2">
+                  <p className="text-lg font-medium text-gray-700">
+                    {isRecording ? '🟢 Listening to your response...' : isProcessing ? '💭 Interviewer is thinking...' : '⚪ Speak when you\'re ready'}
+                  </p>
+                </div>
+              )}
 
-          {error && (
-            <div className="mt-8 w-full max-w-md p-4 bg-red-100 border border-red-400 rounded">
-              <p className="font-semibold text-red-700">Error:</p>
-              <p className="text-red-600">{error}</p>
-              <button
-                onClick={initializeInterview}
-                className="mt-3 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors w-full"
-              >
-                Retry
-              </button>
+              {!isActive && !error && (
+                <div className="mt-6 text-center space-y-2">
+                  <p className="text-lg font-medium text-blue-600 animate-pulse">
+                    🔄 Initializing interview...
+                  </p>
+                  <p className="text-sm text-gray-600">
+                    Please allow microphone access when prompted
+                  </p>
+                </div>
+              )}
+
+              {error && (
+                <div className="mt-8 w-full max-w-md p-4 bg-red-100 border border-red-400 rounded">
+                  <p className="font-semibold text-red-700">Error:</p>
+                  <p className="text-red-600">{error}</p>
+                  <button
+                    onClick={initializeInterview}
+                    className="mt-3 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors w-full"
+                  >
+                    Retry
+                  </button>
+                </div>
+              )}
             </div>
           )}
         </div>
