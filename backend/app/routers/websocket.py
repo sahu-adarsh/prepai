@@ -494,6 +494,30 @@ async def voice_interview_websocket(websocket: WebSocket, session_id: str):
                                 combined_audio = b''.join(streaming_audio_chunks)
                                 streaming_audio_chunks = []
                                 await process_voice_turn(combined_audio)
+                        elif data.get('type') == 'code_submission':
+                            print(f"[{session_id}] Code submission received")
+                            # Format code submission for conversation context
+                            code = data.get('code', '')
+                            language = data.get('language', 'unknown')
+                            all_passed = data.get('allTestsPassed', False)
+                            test_results = data.get('testResults', [])
+
+                            # Create a summary message for the agent
+                            status = "passed all tests" if all_passed else "failed some tests"
+                            summary = f"Candidate submitted {language} code that {status}. "
+                            summary += f"Tests: {len([t for t in test_results if t.get('passed')])} passed, "
+                            summary += f"{len([t for t in test_results if not t.get('passed')])} failed."
+
+                            # Add to session transcript
+                            s3_service.update_session_transcript(session_id, {
+                                "role": "system",
+                                "content": summary,
+                                "timestamp": datetime.utcnow().isoformat(),
+                                "code": code,
+                                "testResults": test_results
+                            })
+
+                            print(f"[{session_id}] Code submission logged: {summary}")
                 except Exception as e:
                     print(f"Error parsing control message: {e}")
 

@@ -406,14 +406,6 @@ export default function VoiceInterview({ sessionId, interviewType, candidateName
                 </button>
               </div>
 
-              {/* Coding Question Display */}
-              {codingQuestion.question && (
-                <div className="p-4 bg-blue-50 border-b border-blue-200">
-                  <h3 className="text-sm font-semibold text-blue-900 mb-2">Problem Statement:</h3>
-                  <p className="text-sm text-gray-800 whitespace-pre-wrap">{codingQuestion.question}</p>
-                </div>
-              )}
-
               {/* Code Editor Component */}
               <div className="flex-1 min-h-0">
                 <CodeEditor
@@ -423,13 +415,21 @@ export default function VoiceInterview({ sessionId, interviewType, candidateName
                   testCases={codingQuestion.testCases}
                   onCodeSubmit={(code, result) => {
                     console.log('Code submitted:', code, result);
-                    // You can send results back via WebSocket if needed
+
+                    // Send code submission to chatbot via WebSocket
                     if (wsRef.current?.readyState === WebSocket.OPEN) {
-                      wsRef.current.send(JSON.stringify({
+                      const submissionMessage = {
                         type: 'code_submission',
                         code,
-                        result
-                      }));
+                        language: codingQuestion.language,
+                        allTestsPassed: result.allTestsPassed,
+                        testResults: result.testResults,
+                        executionTime: result.executionTime,
+                        error: result.error
+                      };
+
+                      wsRef.current.send(JSON.stringify(submissionMessage));
+                      console.log('Code submission sent to chatbot:', submissionMessage);
                     }
                   }}
                 />
