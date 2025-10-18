@@ -44,9 +44,27 @@ export default function CodeEditor({
   onCodeSubmit
 }: CodeEditorProps) {
   const [code, setCode] = useState(initialCode);
+  const [currentLanguage, setCurrentLanguage] = useState(language);
   const [isRunning, setIsRunning] = useState(false);
   const [testResults, setTestResults] = useState<TestResult | null>(null);
   const editorRef = useRef<any>(null);
+
+  // Update code template when language changes
+  const getDefaultCode = (lang: string) => {
+    if (lang === 'python') {
+      return '# Write your code here\ndef solution(arr):\n    # Your implementation\n    return arr\n';
+    } else {
+      return '// Write your code here\nfunction solution(arr) {\n  // Your implementation\n  return arr;\n}\n';
+    }
+  };
+
+  const handleLanguageChange = (newLanguage: string) => {
+    if (confirm(`Switch to ${newLanguage}? This will reset your code.`)) {
+      setCurrentLanguage(newLanguage);
+      setCode(getDefaultCode(newLanguage));
+      setTestResults(null);
+    }
+  };
 
   const handleEditorDidMount = (editor: any) => {
     editorRef.current = editor;
@@ -71,7 +89,7 @@ export default function CodeEditor({
         body: JSON.stringify({
           sessionId,
           code,
-          language,
+          language: currentLanguage,
           testCases: testCases.map(tc => ({
             input: tc.input,
             expected: tc.expected
@@ -128,11 +146,34 @@ export default function CodeEditor({
             <div className="w-3 h-3 rounded-full bg-green-500"></div>
           </div>
           <span className="text-gray-300 text-sm ml-4">
-            solution.{language === 'python' ? 'py' : 'js'}
+            solution.{currentLanguage === 'python' ? 'py' : 'js'}
           </span>
         </div>
 
         <div className="flex items-center space-x-2">
+          {/* Language Toggle */}
+          <div className="flex bg-gray-700 rounded overflow-hidden">
+            <button
+              onClick={() => handleLanguageChange('javascript')}
+              className={`px-3 py-1.5 text-sm transition-colors ${
+                currentLanguage === 'javascript'
+                  ? 'bg-blue-600 text-white'
+                  : 'text-gray-300 hover:bg-gray-600'
+              }`}
+            >
+              JavaScript
+            </button>
+            <button
+              onClick={() => handleLanguageChange('python')}
+              className={`px-3 py-1.5 text-sm transition-colors ${
+                currentLanguage === 'python'
+                  ? 'bg-blue-600 text-white'
+                  : 'text-gray-300 hover:bg-gray-600'
+              }`}
+            >
+              Python
+            </button>
+          </div>
           <button
             onClick={resetCode}
             className="px-3 py-1.5 bg-gray-700 text-gray-200 rounded hover:bg-gray-600 transition-colors flex items-center space-x-1.5 text-sm"
@@ -178,8 +219,9 @@ export default function CodeEditor({
       {/* Editor */}
       <div className="flex-1 min-h-0">
         <Editor
+          key={currentLanguage}
           height="100%"
-          defaultLanguage={language}
+          language={currentLanguage}
           value={code}
           onChange={(value) => setCode(value || '')}
           onMount={handleEditorDidMount}
