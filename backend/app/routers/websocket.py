@@ -40,11 +40,12 @@ async def voice_interview_websocket(websocket: WebSocket, session_id: str):
     Handles: Audio streaming, Speech-to-Text, LLM interaction, Text-to-Speech
     """
     try:
-        # Initialize models BEFORE accepting connection
+        # Accept connection FIRST for faster perceived performance
+        await websocket.accept()
+
+        # Initialize models AFTER accepting connection (in background)
         whisper = get_whisper_model()
         tts = get_tts_model()
-
-        await websocket.accept()
 
         # Initialize services
         bedrock_service = BedrockService()
@@ -140,14 +141,34 @@ async def voice_interview_websocket(websocket: WebSocket, session_id: str):
         processing = True
 
         try:
-            # Get session data to personalize greeting
-            session_data = s3_service.get_session(session_id)
+            # Fetch session data asynchronously to avoid blocking
+            session_data = await asyncio.to_thread(s3_service.get_session, session_id)
             candidate_name = session_data.get("candidate_name", "candidate") if session_data else "candidate"
             interview_type = session_data.get("interview_type", "Technical Interview") if session_data else "Technical Interview"
 
-            # Create greeting prompt for the interviewer
-            greeting_prompt = f"Start the interview by introducing yourself (Alex Rivera) as the interviewer and welcoming {candidate_name} to the {interview_type}. Keep it brief and professional."
+            # Use a simple, fast greeting without Bedrock for instant response
+            # This eliminates the 2-5 second Bedrock cold start delay
+            greeting_text = f"Hello {candidate_name}, I'm Alex Rivera, your interviewer for today's {interview_type}. Let's begin. Please tell me about yourself."
 
+            print(f"[{datetime.now()}] Sending fast introduction...")
+
+            # Send text immediately
+            await websocket.send_json({
+                "type": "llm_chunk",
+                "text": greeting_text
+            })
+
+            # Generate TTS for the greeting
+            audio_bytes = await text_to_speech(greeting_text)
+            if len(audio_bytes) > 44:
+                await websocket.send_bytes(audio_bytes)
+
+            full_response = greeting_text
+
+            # Alternative: Use Bedrock if you need dynamic greetings (slower but more personalized)
+            # Uncomment below to use Bedrock Agent instead
+            """
+            greeting_prompt = f"Start the interview by introducing yourself (Alex Rivera) as the interviewer and welcoming {candidate_name} to the {interview_type}. Keep it brief and professional."
             print(f"[{datetime.now()}] Sending interviewer introduction...")
             full_response = ""
             text_buffer = ""
@@ -197,6 +218,7 @@ async def voice_interview_websocket(websocket: WebSocket, session_id: str):
                 audio_bytes = await text_to_speech(full_response)
                 if len(audio_bytes) > 44:
                     await websocket.send_bytes(audio_bytes)
+            """
 
             # Signal completion
             await websocket.send_json({
@@ -205,12 +227,16 @@ async def voice_interview_websocket(websocket: WebSocket, session_id: str):
                 "role": "assistant"
             })
 
-            # Save introduction to transcript
-            s3_service.update_session_transcript(session_id, {
-                "role": "assistant",
-                "content": full_response,
-                "timestamp": datetime.utcnow().isoformat()
-            })
+            # Save introduction to transcript in background (non-blocking)
+            asyncio.create_task(asyncio.to_thread(
+                s3_service.update_session_transcript,
+                session_id,
+                {
+                    "role": "assistant",
+                    "content": full_response,
+                    "timestamp": datetime.utcnow().isoformat()
+                }
+            ))
 
         except Exception as e:
             print(f"Error sending introduction: {e}")

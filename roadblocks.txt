@@ -4,3 +4,8 @@ AI processing error: An error occurred (throttlingException) when calling the In
 #2 Initial connection/authentication to AWS Bedrock
 Fix: Connection Pooling + Keep-Alive
 
+#3 Reduce initial greeting delay from 5-10s to 1-2s
+Optimize WebSocket connection and greeting flow to provide faster interview start:
+- Accept WebSocket connection before initializing models
+- Replace Bedrock Agent greeting with fast template-based response
+- Move S3 operations to async background tasks
