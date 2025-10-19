@@ -160,6 +160,13 @@ class BedrockService:
                 "performance_score": str(session_state.get("performanceScore", 5)),
             }
 
+            # Debug logging
+            print(f"[BEDROCK] Session attributes being sent:")
+            print(f"  - interview_type: {session_attributes.get('interview_type')}")
+            print(f"  - candidate_name: {session_attributes.get('candidate_name')}")
+            print(f"  - current_phase: {session_attributes.get('current_phase')}")
+            print(f"  - focus_areas: {session_attributes.get('focus_areas')}")
+
         while retry_count <= max_retries:
             try:
                 # Prepare invocation parameters

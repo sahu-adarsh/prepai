@@ -233,15 +233,138 @@ def execute_python(code: str, test_cases: List[Dict], function_name: str, timeou
 
 def execute_javascript(code: str, test_cases: List[Dict], function_name: str, timeout: int) -> Dict[str, Any]:
     """
-    Execute JavaScript code (requires Node.js runtime or execjs)
-    For Lambda, we'll use a Python-based JS interpreter or return not implemented
+    Execute JavaScript code using Node.js subprocess
     """
-    return {
-        'success': False,
-        'error': 'JavaScript execution not implemented in this version. Use Python for now.',
+    import subprocess
+    import tempfile
+    import os
+
+    results = {
+        'success': True,
         'language': 'javascript',
-        'testResults': []
+        'testResults': [],
+        'allTestsPassed': True,
+        'executionTime': 0,
+        'output': None,
+        'error': None
     }
+
+    start_time = time.time()
+
+    try:
+        # Run test cases
+        for i, test_case in enumerate(test_cases):
+            test_result = {
+                'testCase': i + 1,
+                'passed': False,
+                'input': test_case.get('input'),
+                'expected': test_case.get('expected'),
+                'actual': None,
+                'error': None
+            }
+
+            try:
+                # Create JavaScript test runner
+                test_input = test_case.get('input', '')
+                expected_output = test_case.get('expected', '')
+
+                # Build JavaScript test code
+                js_test_code = f"""
+{code}
+
+// Test runner
+try {{
+    const input = {test_input};
+    const expected = {expected_output};
+
+    let actual;
+    if (Array.isArray(input)) {{
+        actual = {function_name}(...input);
+    }} else {{
+        actual = {function_name}(input);
+    }}
+
+    console.log(JSON.stringify({{
+        actual: actual,
+        expected: expected,
+        passed: JSON.stringify(actual) === JSON.stringify(expected)
+    }}));
+}} catch (err) {{
+    console.log(JSON.stringify({{
+        error: err.message,
+        passed: false
+    }}));
+}}
+"""
+
+                # Write to temp file
+                with tempfile.NamedTemporaryFile(mode='w', suffix='.js', delete=False) as f:
+                    f.write(js_test_code)
+                    temp_file = f.name
+
+                try:
+                    # Execute with Node.js (if available in Lambda environment)
+                    result = subprocess.run(
+                        ['node', temp_file],
+                        capture_output=True,
+                        text=True,
+                        timeout=timeout
+                    )
+
+                    if result.returncode == 0 and result.stdout:
+                        output = json.loads(result.stdout.strip())
+                        test_result['actual'] = str(output.get('actual'))
+                        test_result['passed'] = output.get('passed', False)
+
+                        if output.get('error'):
+                            test_result['error'] = output['error']
+                            test_result['passed'] = False
+                            results['allTestsPassed'] = False
+                        elif not test_result['passed']:
+                            results['allTestsPassed'] = False
+                    else:
+                        # Node.js error
+                        error_msg = result.stderr or 'Execution failed'
+                        test_result['error'] = error_msg
+                        test_result['passed'] = False
+                        results['allTestsPassed'] = False
+
+                finally:
+                    # Clean up temp file
+                    if os.path.exists(temp_file):
+                        os.unlink(temp_file)
+
+            except subprocess.TimeoutExpired:
+                test_result['error'] = f'Timeout: execution exceeded {timeout} seconds'
+                test_result['passed'] = False
+                results['allTestsPassed'] = False
+
+            except FileNotFoundError:
+                # Node.js not available, fall back to Python-based JS execution
+                test_result['error'] = 'Node.js runtime not available in Lambda. Please use Python or deploy with Node.js layer.'
+                test_result['passed'] = False
+                results['allTestsPassed'] = False
+                results['success'] = False
+
+            except Exception as e:
+                test_result['error'] = str(e)
+                test_result['passed'] = False
+                results['allTestsPassed'] = False
+
+            results['testResults'].append(test_result)
+
+        # Store output from last successful run
+        if results['testResults'] and results['testResults'][-1].get('actual'):
+            results['output'] = results['testResults'][-1]['actual']
+
+    except Exception as e:
+        results['success'] = False
+        results['error'] = f'JavaScript execution error: {str(e)}'
+        results['allTestsPassed'] = False
+
+    results['executionTime'] = round(time.time() - start_time, 3)
+
+    return results
 
 
 # For testing locally
