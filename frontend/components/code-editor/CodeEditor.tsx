@@ -2,7 +2,7 @@
 
 import { useState, useRef } from 'react';
 import Editor from '@monaco-editor/react';
-import { Play, RotateCcw, Save, Loader2, CheckCircle, XCircle } from 'lucide-react';
+import { Play, RotateCcw, Save, Loader2, CheckCircle, XCircle, ChevronDown } from 'lucide-react';
 
 interface TestCase {
   input: string;
@@ -38,8 +38,8 @@ interface CodeEditorProps {
 
 export default function CodeEditor({
   sessionId,
-  initialCode = '// Write your code here\nfunction solution(arr) {\n  // Your implementation\n  return arr;\n}\n',
-  language = 'javascript',
+  initialCode = '# Write your code here\ndef solution(arr):\n    # Your implementation\n    return arr\n',
+  language = 'python',
   testCases = [],
   onCodeSubmit
 }: CodeEditorProps) {
@@ -47,6 +47,7 @@ export default function CodeEditor({
   const [currentLanguage, setCurrentLanguage] = useState(language);
   const [isRunning, setIsRunning] = useState(false);
   const [testResults, setTestResults] = useState<TestResult | null>(null);
+  const [isLanguageDropdownOpen, setIsLanguageDropdownOpen] = useState(false);
   const editorRef = useRef<any>(null);
 
   // Update code template when language changes
@@ -151,28 +152,50 @@ export default function CodeEditor({
         </div>
 
         <div className="flex items-center space-x-2">
-          {/* Language Toggle */}
-          <div className="flex bg-gray-700 rounded overflow-hidden">
+          {/* Language Dropdown */}
+          <div className="relative">
             <button
-              onClick={() => handleLanguageChange('javascript')}
-              className={`px-3 py-1.5 text-sm transition-colors ${
-                currentLanguage === 'javascript'
-                  ? 'bg-blue-600 text-white'
-                  : 'text-gray-300 hover:bg-gray-600'
-              }`}
+              onClick={() => setIsLanguageDropdownOpen(!isLanguageDropdownOpen)}
+              className="px-3 py-1.5 bg-gray-700 text-gray-200 rounded hover:bg-gray-600 transition-colors flex items-center space-x-1.5 text-sm"
             >
-              JavaScript
+              <span>{currentLanguage === 'python' ? 'Python' : 'JavaScript'}</span>
+              <ChevronDown className="w-4 h-4" />
             </button>
-            <button
-              onClick={() => handleLanguageChange('python')}
-              className={`px-3 py-1.5 text-sm transition-colors ${
-                currentLanguage === 'python'
-                  ? 'bg-blue-600 text-white'
-                  : 'text-gray-300 hover:bg-gray-600'
-              }`}
-            >
-              Python
-            </button>
+
+            {isLanguageDropdownOpen && (
+              <div className="absolute top-full mt-1 bg-gray-700 rounded shadow-lg overflow-hidden z-10 min-w-full">
+                <button
+                  onClick={() => {
+                    setIsLanguageDropdownOpen(false);
+                    if (currentLanguage !== 'python') {
+                      handleLanguageChange('python');
+                    }
+                  }}
+                  className={`w-full px-3 py-2 text-sm text-left transition-colors ${
+                    currentLanguage === 'python'
+                      ? 'bg-blue-600 text-white'
+                      : 'text-gray-300 hover:bg-gray-600'
+                  }`}
+                >
+                  Python
+                </button>
+                <button
+                  onClick={() => {
+                    setIsLanguageDropdownOpen(false);
+                    if (currentLanguage !== 'javascript') {
+                      handleLanguageChange('javascript');
+                    }
+                  }}
+                  className={`w-full px-3 py-2 text-sm text-left transition-colors ${
+                    currentLanguage === 'javascript'
+                      ? 'bg-blue-600 text-white'
+                      : 'text-gray-300 hover:bg-gray-600'
+                  }`}
+                >
+                  JavaScript
+                </button>
+              </div>
+            )}
           </div>
           <button
             onClick={resetCode}

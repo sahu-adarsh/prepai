@@ -424,15 +424,29 @@ async def voice_interview_websocket(websocket: WebSocket, session_id: str):
                 transcript_history = session_data.get("transcript", []) if session_data else []
                 turn_count = len([msg for msg in transcript_history if msg.get("role") == "user"])
 
-                # Determine current phase based on turn count
-                if turn_count <= 1:
-                    current_phase = "introduction"
+                # Get interview configuration to determine phase progression
+                from app.config.interview_types import get_interview_config
+                interview_config = get_interview_config(session_data.get("interview_type", "Technical Interview") if session_data else "Technical Interview")
+
+                # Get custom phase flow for this interview type
+                phases = interview_config.get("phases", ["introduction", "background", "technical", "problem_solving", "closing"])
+
+                # Determine current phase based on turn count and phase progression
+                # Coding practice: ["introduction", "coding"] - 2 phases
+                # Regular interviews: ["introduction", "background", "technical", "problem_solving", "closing"] - 5 phases
+                if turn_count == 0:
+                    current_phase = phases[0]  # introduction
+                elif turn_count <= 1:
+                    current_phase = phases[1] if len(phases) > 1 else phases[0]  # coding or background
+                elif len(phases) == 2:
+                    # Coding practice - stay in coding phase
+                    current_phase = phases[1]  # coding
                 elif turn_count <= 3:
-                    current_phase = "background"
+                    current_phase = phases[2] if len(phases) > 2 else phases[-1]  # technical or behavioral
                 elif turn_count <= 8:
-                    current_phase = "technical"
+                    current_phase = phases[3] if len(phases) > 3 else phases[-1]  # problem_solving or scenario_based
                 else:
-                    current_phase = "problem_solving"
+                    current_phase = phases[-1]  # closing
 
                 session_state_for_bedrock = {
                     "interviewType": session_data.get("interview_type", "Technical Interview") if session_data else "Technical Interview",
@@ -556,9 +570,9 @@ async def voice_interview_websocket(websocket: WebSocket, session_id: str):
                 await websocket.send_json({
                     "type": "coding_question",
                     "question": full_response,
-                    "language": "javascript",  # Default language
+                    "language": "python",  # Default language
                     "testCases": [],  # You can populate this based on the question
-                    "initialCode": "// Write your code here\nfunction solution() {\n  // Your implementation\n  return null;\n}\n"
+                    "initialCode": "# Write your code here\ndef solution(arr):\n    # Your implementation\n    return arr\n"
                 })
                 print(f"[{session_id}] Code editor signal sent to frontend")
 
@@ -616,6 +630,7 @@ async def voice_interview_websocket(websocket: WebSocket, session_id: str):
                             language = data.get('language', 'unknown')
                             all_passed = data.get('allTestsPassed', False)
                             test_results = data.get('testResults', [])
+                            error = data.get('error', '')
 
                             # Create a summary message for the agent
                             status = "passed all tests" if all_passed else "failed some tests"
@@ -633,6 +648,108 @@ async def voice_interview_websocket(websocket: WebSocket, session_id: str):
                             })
 
                             print(f"[{session_id}] Code submission logged: {summary}")
+
+                            # Generate chatbot response to the code submission
+                            if not processing:
+                                processing = True
+                                try:
+                                    # Get session data
+                                    session_data = s3_service.get_session(session_id)
+                                    candidate_name = session_data.get("candidate_name", "candidate") if session_data else "candidate"
+
+                                    # Build context for the agent about the code submission
+                                    if all_passed:
+                                        prompt = f"[CONTEXT: {candidate_name} just submitted {language} code that passed all {len(test_results)} test cases successfully.]\n"
+                                        prompt += "[INSTRUCTION: Provide brief positive feedback and ask a follow-up question about their approach or optimization.]\n"
+                                        prompt += f"Code submission: All tests passed!"
+                                    elif error:
+                                        prompt = f"[CONTEXT: {candidate_name} just submitted {language} code that had an error: {error}]\n"
+                                        prompt += "[INSTRUCTION: Provide constructive feedback on the error and guide them to fix it.]\n"
+                                        prompt += f"Code submission: Execution error occurred."
+                                    else:
+                                        failed_count = len([t for t in test_results if not t.get('passed')])
+                                        prompt = f"[CONTEXT: {candidate_name} just submitted {language} code. {len(test_results) - failed_count} tests passed, {failed_count} tests failed.]\n"
+                                        prompt += "[INSTRUCTION: Provide constructive feedback on what might be wrong and guide them to debug.]\n"
+                                        prompt += f"Code submission: Some tests failed."
+
+                                    prompt += "\n[REMINDER: Respond with MAXIMUM 2-3 sentences. Ask EXACTLY ONE question. NO bullet points, NO lists, NO asterisks.]"
+
+                                    # Get response from Bedrock Agent
+                                    full_response = ""
+                                    text_buffer = ""
+                                    sentence_endings = re.compile(r'[.!?]\s*')
+
+                                    event_stream = bedrock_service.invoke_agent(
+                                        session_id=session_id,
+                                        input_text=prompt
+                                    )
+
+                                    for event in event_stream:
+                                        if 'chunk' in event:
+                                            chunk_data = event['chunk']
+                                            if 'bytes' in chunk_data:
+                                                chunk_text = chunk_data['bytes'].decode('utf-8')
+                                                full_response += chunk_text
+                                                text_buffer += chunk_text
+
+                                                # Send text chunk to frontend
+                                                await websocket.send_json({
+                                                    "type": "llm_chunk",
+                                                    "text": chunk_text
+                                                })
+
+                                                # Generate TTS for complete sentences
+                                                sentences = sentence_endings.split(text_buffer)
+
+                                                for sentence in sentences[:-1]:
+                                                    sentence = sentence.strip()
+                                                    if sentence:
+                                                        # Clean stage directions before TTS
+                                                        cleaned_sentence = clean_agent_response(sentence)
+                                                        if cleaned_sentence:
+                                                            audio_bytes = await text_to_speech(cleaned_sentence)
+                                                            if len(audio_bytes) > 44:
+                                                                await websocket.send_bytes(audio_bytes)
+
+                                                # Keep incomplete fragment
+                                                text_buffer = sentences[-1] if sentences else ""
+
+                                    # Process remaining text
+                                    if text_buffer.strip():
+                                        cleaned_text = clean_agent_response(text_buffer)
+                                        if cleaned_text:
+                                            audio_bytes = await text_to_speech(cleaned_text)
+                                            if len(audio_bytes) > 44:
+                                                await websocket.send_bytes(audio_bytes)
+
+                                    # Validate and truncate response
+                                    validated_response = validate_and_truncate_response(full_response)
+                                    full_response = validated_response
+
+                                    # Signal completion
+                                    await websocket.send_json({
+                                        "type": "assistant_complete",
+                                        "text": full_response,
+                                        "role": "assistant"
+                                    })
+
+                                    # Save assistant response to transcript
+                                    s3_service.update_session_transcript(session_id, {
+                                        "role": "assistant",
+                                        "content": full_response,
+                                        "timestamp": datetime.utcnow().isoformat()
+                                    })
+
+                                    print(f"[{session_id}] Chatbot response sent: {full_response}")
+
+                                except Exception as e:
+                                    print(f"Error generating code feedback: {e}")
+                                    await websocket.send_json({
+                                        "type": "error",
+                                        "message": f"Failed to generate feedback: {str(e)}"
+                                    })
+                                finally:
+                                    processing = False
                 except Exception as e:
                     print(f"Error parsing control message: {e}")
 

@@ -91,7 +91,7 @@ export default function VoiceInterview({ sessionId, interviewType, candidateName
           setShowCodeEditor(true);
           setCodingQuestion({
             question: data.question || data.text || '',
-            language: data.language || 'javascript',
+            language: data.language || 'python',
             testCases: data.testCases || [],
             initialCode: data.initialCode || ''
           });
