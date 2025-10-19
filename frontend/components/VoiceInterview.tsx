@@ -413,15 +413,15 @@ export default function VoiceInterview({ sessionId, interviewType, candidateName
                   initialCode={codingQuestion.initialCode}
                   language={codingQuestion.language}
                   testCases={codingQuestion.testCases}
-                  onCodeSubmit={(code, result) => {
-                    console.log('Code submitted:', code, result);
+                  onCodeSubmit={(code, result, language) => {
+                    console.log('Code submitted:', code, result, language);
 
                     // Send code submission to chatbot via WebSocket
                     if (wsRef.current?.readyState === WebSocket.OPEN) {
                       const submissionMessage = {
                         type: 'code_submission',
                         code,
-                        language: codingQuestion.language,
+                        language,
                         allTestsPassed: result.allTestsPassed,
                         testResults: result.testResults,
                         executionTime: result.executionTime,

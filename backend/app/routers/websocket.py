@@ -68,6 +68,70 @@ def clean_agent_response(text: str) -> str:
 
     return cleaned
 
+
+def validate_and_truncate_response(text: str) -> str:
+    """
+    Validate agent response follows formatting rules and truncate if needed.
+
+    Enforces:
+    - Maximum 3 sentences
+    - No bullet points or numbered lists
+    - Stops at first question mark to ensure ONE question
+
+    Args:
+        text: Raw response from agent
+
+    Returns:
+        Validated and potentially truncated response
+    """
+    if not text:
+        return text
+
+    # Remove bullet points and list markers
+    # Pattern: lines starting with -, *, •, numbers like "1.", "2.", etc.
+    lines = text.split('\n')
+    cleaned_lines = []
+
+    for line in lines:
+        stripped = line.strip()
+        # Skip lines that are bullet points or numbered lists
+        if re.match(r'^[\-\*•\d]+[\.\)]\s', stripped):
+            continue
+        # Skip lines that start with bold markers like **
+        if stripped.startswith('**'):
+            continue
+        if stripped:  # Keep non-empty lines
+            cleaned_lines.append(stripped)
+
+    text = ' '.join(cleaned_lines)
+
+    # Split into sentences (rough approximation)
+    sentences = re.split(r'([.!?])\s+', text)
+
+    # Reconstruct sentences with their punctuation
+    reconstructed = []
+    for i in range(0, len(sentences) - 1, 2):
+        if i + 1 < len(sentences):
+            sentence = sentences[i] + sentences[i + 1]
+            reconstructed.append(sentence.strip())
+
+    # Handle last sentence if it doesn't end with punctuation
+    if len(sentences) % 2 == 1 and sentences[-1].strip():
+        reconstructed.append(sentences[-1].strip())
+
+    # Limit to 3 sentences
+    if len(reconstructed) > 3:
+        reconstructed = reconstructed[:3]
+
+    # If there's a question mark, truncate after the FIRST question
+    result = ' '.join(reconstructed)
+    question_match = re.search(r'[^?]*\?', result)
+    if question_match:
+        # Keep everything up to and including the first question mark
+        result = question_match.group(0).strip()
+
+    return result
+
 def get_whisper_model():
     global whisper_model
     if whisper_model is None:
@@ -350,18 +414,57 @@ async def voice_interview_websocket(websocket: WebSocket, session_id: str):
             try:
                 # Get session state to pass interview configuration to Bedrock
                 session_data = s3_service.get_session(session_id)
+
+                # Debug: Log session data
+                print(f"[{session_id}] Session data retrieved:")
+                print(f"  - candidate_name: {session_data.get('candidate_name') if session_data else 'NO SESSION DATA'}")
+                print(f"  - interview_type: {session_data.get('interview_type') if session_data else 'NO SESSION DATA'}")
+
+                # Count turns from transcript to determine current phase
+                transcript_history = session_data.get("transcript", []) if session_data else []
+                turn_count = len([msg for msg in transcript_history if msg.get("role") == "user"])
+
+                # Determine current phase based on turn count
+                if turn_count <= 1:
+                    current_phase = "introduction"
+                elif turn_count <= 3:
+                    current_phase = "background"
+                elif turn_count <= 8:
+                    current_phase = "technical"
+                else:
+                    current_phase = "problem_solving"
+
                 session_state_for_bedrock = {
                     "interviewType": session_data.get("interview_type", "Technical Interview") if session_data else "Technical Interview",
                     "candidateName": session_data.get("candidate_name", "candidate") if session_data else "candidate",
                     "resumeSummary": session_data.get("resume_summary", "Not provided") if session_data else "Not provided",
-                    "turnCount": 0,  # You can track this if needed
-                    "currentPhase": "technical",  # Track interview phase
+                    "turnCount": turn_count,
+                    "currentPhase": current_phase,
                     "difficultyLevel": "medium"  # Adapt based on performance
                 }
 
+                # Add context and constraints to the prompt
+                # This ensures the agent knows all the interview details
+                candidate_name = session_data.get("candidate_name", "candidate") if session_data else "candidate"
+                interview_type = session_data.get("interview_type", "Technical Interview") if session_data else "Technical Interview"
+
+                # Get full interview configuration based on type
+                from app.config.interview_types import get_interview_config
+                interview_config = get_interview_config(interview_type)
+
+                # Build comprehensive context from config
+                display_name = interview_config.get("display_name", interview_type)
+                focus_areas = interview_config.get("focus_areas", "technical skills")
+                key_topics = interview_config.get("key_topics", "general topics")
+                difficulty = interview_config.get("difficulty_range", "medium")
+
+                context_prefix = f"[CONTEXT: Interviewing {candidate_name} for {display_name}. Focus: {focus_areas}. Topics: {key_topics}. Difficulty: {difficulty}. Current phase: {current_phase}.]\n"
+                constraint_reminder = "[REMINDER: Respond with MAXIMUM 2-3 sentences. Ask EXACTLY ONE question. NO bullet points, NO lists, NO asterisks.]\n\n"
+                enhanced_input = context_prefix + constraint_reminder + transcript
+
                 event_stream = bedrock_service.invoke_agent(
                     session_id=session_id,
-                    input_text=transcript,
+                    input_text=enhanced_input,
                     session_state=session_state_for_bedrock
                 )
                 print(f"[{datetime.now()}] Bedrock Agent invoked with session state")
@@ -413,6 +516,18 @@ async def voice_interview_websocket(websocket: WebSocket, session_id: str):
                     "message": f"AI processing error: {str(e)}"
                 })
                 full_response = "I apologize, but I encountered an error processing your response."
+
+            # Validate and truncate response to enforce formatting rules
+            validated_response = validate_and_truncate_response(full_response)
+
+            # Log if response was truncated
+            if len(validated_response) < len(full_response):
+                print(f"[{session_id}] Response truncated: {len(full_response)} -> {len(validated_response)} chars")
+                print(f"[{session_id}] Original: {full_response[:100]}...")
+                print(f"[{session_id}] Validated: {validated_response}")
+
+            # Use validated response for all further processing
+            full_response = validated_response
 
             # Detect coding question patterns in the response
             coding_keywords = [

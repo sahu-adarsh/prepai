@@ -33,7 +33,7 @@ interface CodeEditorProps {
   initialCode?: string;
   language?: string;
   testCases?: TestCase[];
-  onCodeSubmit?: (code: string, result: TestResult) => void;
+  onCodeSubmit?: (code: string, result: TestResult, language: string) => void;
 }
 
 export default function CodeEditor({
@@ -104,7 +104,7 @@ export default function CodeEditor({
 
       const result: TestResult = await response.json();
       setTestResults(result);
-      onCodeSubmit?.(code, result);
+      onCodeSubmit?.(code, result, currentLanguage);
     } catch (error) {
       console.error('Code execution error:', error);
       setTestResults({
