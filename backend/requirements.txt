@@ -12,8 +12,8 @@ botocore
 
 # Voice Processing
 faster-whisper
-TTS
-espeak-ng
+edge-tts  # Fast, free TTS using Microsoft Edge
+torch  # Required for Whisper GPU support
 
 # Utilities
 python-dotenv
