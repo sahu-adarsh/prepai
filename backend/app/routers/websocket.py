@@ -2,12 +2,11 @@ from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from app.services.bedrock_service import BedrockService
 from app.services.s3_service import S3Service
 from faster_whisper import WhisperModel
-from TTS.api import TTS
-import numpy as np
+import edge_tts
+import torch
 import io
 import tempfile
 import os
-import wave
 import re
 import json
 import asyncio
@@ -17,7 +16,8 @@ router = APIRouter()
 
 # Initialize models (lazy loading recommended for production)
 whisper_model = None
-tts_model = None
+# Edge TTS voice - Indian English female (fast and natural)
+EDGE_TTS_VOICE = "en-IN-NeerjaExpressiveNeural"
 
 
 def clean_agent_response(text: str) -> str:
@@ -133,18 +133,46 @@ def validate_and_truncate_response(text: str) -> str:
     return result
 
 def get_whisper_model():
+    """
+    Initialize Whisper model with GPU support if available.
+    Supports: NVIDIA CUDA, Apple Silicon (MPS), CPU fallback.
+    """
     global whisper_model
     if whisper_model is None:
-        whisper_model = WhisperModel("small", device="cpu", compute_type="int8")
-    return whisper_model
+        # Auto-detect best available device
+        if torch.cuda.is_available():
+            device = "cuda"
+            compute_type = "float16"
+            acceleration_info = "NVIDIA CUDA GPU"
+        elif hasattr(torch.backends, 'mps') and torch.backends.mps.is_available():
+            # Apple Silicon (M1/M2/M3/M4) - Use CPU with optimized compute type
+            # Note: faster-whisper doesn't support MPS directly, but runs efficiently on Apple Silicon CPU
+            device = "cpu"
+            compute_type = "int8"
+            acceleration_info = "Apple Silicon (optimized)"
+        else:
+            device = "cpu"
+            compute_type = "int8"
+            acceleration_info = "CPU only"
 
-def get_tts_model():
-    global tts_model
-    if tts_model is None:
-        print("Loading Coqui TTS model (VITS)...")
-        tts_model = TTS(model_name="tts_models/en/vctk/vits", progress_bar=False)
-        print("Coqui TTS model loaded successfully")
-    return tts_model
+        print(f"[WHISPER] Initializing on {device.upper()} with {compute_type}")
+        print(f"[WHISPER] Hardware: {acceleration_info}")
+
+        whisper_model = WhisperModel(
+            "small",  # Use "small" for balance, or "tiny" for even faster processing
+            device=device,
+            compute_type=compute_type,
+            num_workers=4  # Utilize multiple cores on Apple Silicon
+        )
+
+        if device == "cuda":
+            print(f"[WHISPER] GPU acceleration enabled (expected 3-5x speedup)")
+        elif "Apple Silicon" in acceleration_info:
+            print(f"[WHISPER] Apple Silicon detected - optimized performance on Neural Engine")
+        else:
+            print(f"[WHISPER] Running on standard CPU")
+
+    return whisper_model
 
 @router.websocket("/ws/interview/{session_id}")
 async def voice_interview_websocket(websocket: WebSocket, session_id: str):
@@ -156,9 +184,8 @@ async def voice_interview_websocket(websocket: WebSocket, session_id: str):
         # Accept connection FIRST for faster perceived performance
         await websocket.accept()
 
-        # Initialize models AFTER accepting connection (in background)
+        # Initialize Whisper model (lazy loading)
         whisper = get_whisper_model()
-        tts = get_tts_model()
 
         # Initialize services
         bedrock_service = BedrockService()
@@ -205,41 +232,29 @@ async def voice_interview_websocket(websocket: WebSocket, session_id: str):
                 os.unlink(temp_path)
 
     async def text_to_speech(text: str) -> bytes:
-        """Convert text to speech using Coqui TTS"""
+        """
+        Convert text to speech using Edge TTS (Microsoft Azure).
+        Fast, free, and high-quality neural voices.
+        """
+        import time
+        start_time = time.time()
+
         try:
-            # Generate audio using Coqui TTS
-            wav_data = tts.tts(text=text, speaker="p232") # Authoritative male
+            # Create Edge TTS communication
+            communicate = edge_tts.Communicate(text, EDGE_TTS_VOICE)
 
-            # Convert to numpy array
-            if isinstance(wav_data, np.ndarray):
-                wav_array = wav_data
-            elif isinstance(wav_data, list) and wav_data and isinstance(wav_data[0], (int, float)):
-                # List of raw samples (int/float)
-                wav_array = np.array(wav_data, dtype=np.float32)
-            else:
-                # Fallback: try direct conversion
-                wav_array = np.array(wav_data)
+            # Generate audio and collect chunks
+            audio_buffer = io.BytesIO()
+            async for chunk in communicate.stream():
+                if chunk["type"] == "audio":
+                    audio_buffer.write(chunk["data"])
 
-            # Ensure it's a 1D array
-            if wav_array.ndim == 0:
-                raise ValueError("TTS returned scalar value instead of audio array")
+            elapsed = time.time() - start_time
+            print(f"[EDGE-TTS] Generated {len(text)} chars in {elapsed:.2f}s (~{len(text)/elapsed:.0f} chars/s)")
 
-            wav_array = wav_array.flatten()  # Ensure 1D
-
-            # Convert numpy array to WAV bytes
-            wav_buffer = io.BytesIO()
-            with wave.open(wav_buffer, 'wb') as wav_file:
-                wav_file.setnchannels(1)
-                wav_file.setsampwidth(2)
-                wav_file.setframerate(22050)  # Coqui default sample rate
-
-                # Convert float32 to int16
-                audio_int16 = (wav_array * 32767).astype(np.int16)
-                wav_file.writeframes(audio_int16.tobytes())
-
-            return wav_buffer.getvalue()
+            return audio_buffer.getvalue()
         except Exception as e:
-            print(f"TTS error: {e}")
+            print(f"[EDGE-TTS] Error: {e}")
             import traceback
             traceback.print_exc()
             return b""
@@ -375,9 +390,16 @@ async def voice_interview_websocket(websocket: WebSocket, session_id: str):
 
         processing = True
 
+        # Start overall timer
+        import time
+        overall_start = time.time()
+
         try:
             # Step 1: Speech-to-Text
+            step_start = time.time()
             transcript = await transcribe_audio(audio_data)
+            step_elapsed = time.time() - step_start
+            print(f"[PERF] Step 1 (Whisper STT): {step_elapsed:.2f}s")
 
             if not transcript:
                 processing = False
@@ -405,15 +427,21 @@ async def voice_interview_websocket(websocket: WebSocket, session_id: str):
             ))
 
             # Step 2: Get response from Bedrock Agent (streaming) - starts IMMEDIATELY
+            step_start = time.time()
             print(f"[{datetime.now()}] Calling Bedrock Agent...")
             full_response = ""
             text_buffer = ""
             sentence_endings = re.compile(r'[.!?]\s*')
             coding_question_detected = False
+            bedrock_first_token_time = None
+            bedrock_start = time.time()
 
             try:
                 # Get session state to pass interview configuration to Bedrock
+                session_state_start = time.time()
                 session_data = s3_service.get_session(session_id)
+                session_state_elapsed = time.time() - session_state_start
+                print(f"[PERF] Step 2a (S3 session fetch): {session_state_elapsed:.2f}s")
 
                 # Debug: Log session data
                 print(f"[{session_id}] Session data retrieved:")
@@ -487,6 +515,11 @@ async def voice_interview_websocket(websocket: WebSocket, session_id: str):
                     if 'chunk' in event:
                         chunk_data = event['chunk']
                         if 'bytes' in chunk_data:
+                            # Track first token time
+                            if bedrock_first_token_time is None:
+                                bedrock_first_token_time = time.time() - bedrock_start
+                                print(f"[PERF] Step 2b (Bedrock first token): {bedrock_first_token_time:.2f}s")
+
                             chunk_text = chunk_data['bytes'].decode('utf-8')
                             full_response += chunk_text
                             text_buffer += chunk_text
@@ -521,6 +554,10 @@ async def voice_interview_websocket(websocket: WebSocket, session_id: str):
                         audio_bytes = await text_to_speech(cleaned_text)
                         if len(audio_bytes) > 44:
                             await websocket.send_bytes(audio_bytes)
+
+                # Log Bedrock total time
+                bedrock_total = time.time() - bedrock_start
+                print(f"[PERF] Step 2 (Bedrock complete): {bedrock_total:.2f}s")
 
             except Exception as e:
                 print(f"Bedrock Agent error: {e}")
@@ -584,6 +621,12 @@ async def voice_interview_websocket(websocket: WebSocket, session_id: str):
             })
 
             accumulated_transcript = ""
+
+            # Final performance summary
+            overall_elapsed = time.time() - overall_start
+            print(f"[PERF] ========================================")
+            print(f"[PERF] TOTAL END-TO-END: {overall_elapsed:.2f}s")
+            print(f"[PERF] ========================================")
 
         except Exception as e:
             print(f"Voice processing error: {e}")
